@@ -20,67 +20,29 @@ public class ShopCommand implements CommandExecutor, TabCompleter {
     }
 
     @Override
-    public boolean onCommand(CommandSender sender, Command command,
-                             String label, String[] args) {
+    public boolean onCommand(
+            CommandSender sender,
+            Command command,
+            String label,
+            String[] args
+    ) {
+        String name = command.getName().toLowerCase();
 
-        boolean adminShortcut = label.equalsIgnoreCase("se");
-        boolean reloadShortcut = label.equalsIgnoreCase("sr");
-
-        if (reloadShortcut) {
+        if (name.equals("sr")) {
             if (!sender.hasPermission("vortexshop.admin")) {
                 sender.sendMessage("&cNo permission!");
                 return true;
             }
 
             plugin.reloadPlugin();
-            sender.sendMessage(plugin.getConfigManager().getPrefix() +
-                    plugin.getConfigManager().getMessage("reloaded"));
+            sender.sendMessage(plugin.getConfigManager().getPrefix()
+                    + plugin.getConfigManager().getMessage("reloaded"));
             return true;
         }
 
-        if (args.length == 0) {
+        if (name.equals("se")) {
             if (!(sender instanceof Player player)) {
-                sender.sendMessage("This command is for players only.");
-                return true;
-            }
-
-            if (adminShortcut) {
-                if (!player.hasPermission("vortexshop.admin")) {
-                    player.sendMessage("&cNo permission!");
-                    return true;
-                }
-
-                gui.openEditor(player);
-                return true;
-            }
-
-            if (!player.hasPermission("vortexshop.use")) {
-                player.sendMessage("&cNo permission!");
-                return true;
-            }
-
-            gui.openMain(player);
-            return true;
-        }
-
-        String sub = args[0].toLowerCase();
-
-        if (sub.equals("reload")) {
-            if (!sender.hasPermission("vortexshop.admin")) {
-                sender.sendMessage("&cNo permission!");
-                return true;
-            }
-
-            plugin.reloadPlugin();
-
-            sender.sendMessage(plugin.getConfigManager().getPrefix() +
-                    plugin.getConfigManager().getMessage("reloaded"));
-            return true;
-        }
-
-        if (sub.equals("edit")) {
-            if (!(sender instanceof Player player)) {
-                sender.sendMessage("This command is for players only.");
+                sender.sendMessage("Players only!");
                 return true;
             }
 
@@ -93,28 +55,66 @@ public class ShopCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        sender.sendMessage("&bVortexShop Commands");
-        sender.sendMessage("&7/shop &f- Open shop");
-        sender.sendMessage("&7/shop edit &f- Open editor");
-        sender.sendMessage("&7/shop reload &f- Reload configuration");
-        sender.sendMessage("&7/se &f- Shop editor");
-        sender.sendMessage("&7/sr &f- Reload shop");
-        sender.sendMessage("&7/sell &f- Open sell GUI");
+        if (name.equals("shop")) {
+            if (!(sender instanceof Player player)) {
+                sender.sendMessage("Players only!");
+                return true;
+            }
+
+            if (args.length > 0) {
+                String sub = args[0].toLowerCase();
+
+                if (sub.equals("edit")) {
+                    if (!player.hasPermission("vortexshop.admin")) {
+                        player.sendMessage("&cNo permission!");
+                        return true;
+                    }
+
+                    gui.openEditor(player);
+                    return true;
+                }
+
+                if (sub.equals("reload")) {
+                    if (!player.hasPermission("vortexshop.admin")) {
+                        player.sendMessage("&cNo permission!");
+                        return true;
+                    }
+
+                    plugin.reloadPlugin();
+                    player.sendMessage(plugin.getConfigManager().getPrefix()
+                            + plugin.getConfigManager().getMessage("reloaded"));
+                    return true;
+                }
+
+                player.sendMessage("&cUsage: /shop [edit|reload]");
+                return true;
+            }
+
+            if (!player.hasPermission("vortexshop.use")) {
+                player.sendMessage("&cNo permission!");
+                return true;
+            }
+
+            gui.openMain(player);
+            return true;
+        }
 
         return true;
     }
 
     @Override
-    public List<String> onTabComplete(CommandSender sender, Command command,
-                                      String alias, String[] args) {
-
+    public List<String> onTabComplete(
+            CommandSender sender,
+            Command command,
+            String alias,
+            String[] args
+    ) {
         List<String> result = new ArrayList<>();
 
-        if (!sender.hasPermission("vortexshop.admin")) {
-            return result;
-        }
+        if (command.getName().equalsIgnoreCase("shop")
+                && sender.hasPermission("vortexshop.admin")
+                && args.length == 1) {
 
-        if (args.length == 1) {
             for (String value : List.of("edit", "reload")) {
                 if (value.startsWith(args[0].toLowerCase())) {
                     result.add(value);
