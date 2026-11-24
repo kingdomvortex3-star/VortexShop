@@ -10,6 +10,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.*;
 
 public class ShopManager {
@@ -46,9 +47,10 @@ public class ShopManager {
             try {
                 plugin.saveResource("shops/default.yml", false);
             } catch (IllegalArgumentException exception) {
-                data = new YamlConfiguration();
-                data.createSection("categories");
-                save();
+                plugin.getLogger().severe(
+                        "Missing default shop resource: " + exception.getMessage()
+                );
+                return;
             }
         }
 
@@ -59,14 +61,93 @@ public class ShopManager {
         }
 
         migrateLegacyCategories();
+        mergeDefaultCatalog();
         logShopInformation();
     }
 
+    // =========================================================
+    // DEFAULT CATALOG MIGRATION
+    // =========================================================
+
     /**
-     * One-time migration:
-     * Removes old default categories from previous VortexShop versions.
-     * User-created categories with other IDs are preserved.
+     * Imports categories from the plugin's default.yml resource.
+     *
+     * Existing categories are never overwritten.
+     * Missing default categories are added automatically.
      */
+    private void mergeDefaultCatalog() {
+        int added = 0;
+
+        try (InputStream stream =
+                     plugin.getResource("shops/default.yml")) {
+
+            if (stream == null) {
+                plugin.getLogger().warning(
+                        "Default shop catalog resource not found."
+                );
+                return;
+            }
+
+            YamlConfiguration defaults =
+                    YamlConfiguration.loadConfiguration(
+                            new java.io.InputStreamReader(
+                                    stream,
+                                    java.nio.charset.StandardCharsets.UTF_8
+                            )
+                    );
+
+            ConfigurationSection defaultCategories =
+                    defaults.getConfigurationSection("categories");
+
+            if (defaultCategories == null) {
+                plugin.getLogger().warning(
+                        "Default shop catalog has no categories."
+                );
+                return;
+            }
+
+            ConfigurationSection currentCategories =
+                    data.getConfigurationSection("categories");
+
+            for (String category : defaultCategories.getKeys(false)) {
+
+                if (currentCategories != null
+                        && currentCategories.contains(category)) {
+                    continue;
+                }
+
+                String sourcePath = "categories." + category;
+
+                data.set(
+                        sourcePath,
+                        defaults.getConfigurationSection(sourcePath)
+                                .getValues(true)
+                );
+
+                added++;
+            }
+
+            if (added > 0) {
+                save();
+            }
+
+            plugin.getLogger().info(
+                    "Default shop catalog migration completed. Added "
+                            + added + " categories."
+            );
+
+        } catch (IOException exception) {
+            plugin.getLogger().severe(
+                    "Failed to import default shop catalog: "
+                            + exception.getMessage()
+            );
+        }
+    }
+
+    // =========================================================
+    // LEGACY MIGRATION
+    // =========================================================
+
     private void migrateLegacyCategories() {
         if (data.getBoolean(MIGRATION_KEY, false)) {
             return;
@@ -90,6 +171,10 @@ public class ShopManager {
                 "Legacy category migration completed. Removed: " + removed
         );
     }
+
+    // =========================================================
+    // DEBUG
+    // =========================================================
 
     private void logShopInformation() {
         Set<String> categories = getCategories();
