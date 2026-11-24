@@ -16,33 +16,25 @@ commands:
   shop:
     description: Open VortexShop
     usage: /shop
-    aliases:
-      - se
+
+  se:
+    description: Open Shop Editor
+    usage: /se
+
+  sr:
+    description: Reload VortexShop
+    usage: /sr
 
   sell:
     description: Open Sell GUI
     usage: /sell
 
-  vortexshop:
-    description: VortexShop administration
-    usage: /vortexshop
-    aliases:
-      - vs
-      - sr
-
 permissions:
   vortexshop.admin:
-    description: Full access to shop editor
     default: op
-
   vortexshop.use:
-    description: Access to shop
     default: true
-
   vortexshop.sell:
-    description: Access to sell GUI
     default: true
-
   vortexshop.bypass:
-    description: Bypass shop restrictions
     default: op
