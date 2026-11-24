@@ -15,9 +15,14 @@ import java.util.*;
 public class ShopManager {
 
     private final VortexShop plugin;
-
     private File file;
     private YamlConfiguration data;
+
+    private static final String MIGRATION_KEY =
+            "migrations.remove_legacy_categories_v1";
+
+    private static final List<String> LEGACY_CATEGORIES =
+            List.of("blocks", "farming", "minerals", "mobs");
 
     public ShopManager(VortexShop plugin) {
         this.plugin = plugin;
@@ -31,9 +36,7 @@ public class ShopManager {
         File folder = new File(plugin.getDataFolder(), "shops");
 
         if (!folder.exists() && !folder.mkdirs()) {
-            plugin.getLogger().severe(
-                    "Failed to create shops directory!"
-            );
+            plugin.getLogger().severe("Cannot create shops folder!");
             return;
         }
 
@@ -43,26 +46,49 @@ public class ShopManager {
             try {
                 plugin.saveResource("shops/default.yml", false);
             } catch (IllegalArgumentException exception) {
-                plugin.getLogger().warning(
-                        "Default shop resource not found. Creating empty shop."
-                );
-
                 data = new YamlConfiguration();
                 data.createSection("categories");
                 save();
-                return;
             }
         }
 
         data = YamlConfiguration.loadConfiguration(file);
 
-        if (data.getConfigurationSection("categories") == null
-                && !data.contains("categories")) {
+        if (!data.contains("categories")) {
             data.createSection("categories");
-            save();
         }
 
+        migrateLegacyCategories();
         logShopInformation();
+    }
+
+    /**
+     * One-time migration:
+     * Removes old default categories from previous VortexShop versions.
+     * User-created categories with other IDs are preserved.
+     */
+    private void migrateLegacyCategories() {
+        if (data.getBoolean(MIGRATION_KEY, false)) {
+            return;
+        }
+
+        int removed = 0;
+
+        for (String category : LEGACY_CATEGORIES) {
+            String path = "categories." + category;
+
+            if (data.contains(path)) {
+                data.set(path, null);
+                removed++;
+            }
+        }
+
+        data.set(MIGRATION_KEY, true);
+        save();
+
+        plugin.getLogger().info(
+                "Legacy category migration completed. Removed: " + removed
+        );
     }
 
     private void logShopInformation() {
@@ -70,12 +96,8 @@ public class ShopManager {
 
         plugin.getLogger().info("----------------------------------");
         plugin.getLogger().info("VortexShop Shop Data");
-        plugin.getLogger().info(
-                "File: " + file.getAbsolutePath()
-        );
-        plugin.getLogger().info(
-                "Loaded categories: " + categories.size()
-        );
+        plugin.getLogger().info("File: " + file.getAbsolutePath());
+        plugin.getLogger().info("Loaded categories: " + categories.size());
 
         for (String category : categories) {
             plugin.getLogger().info(" - " + category);
@@ -110,43 +132,29 @@ public class ShopManager {
         ConfigurationSection section =
                 data.getConfigurationSection("categories");
 
-        if (section == null) {
-            return new LinkedHashSet<>();
-        }
+        if (section == null) return new LinkedHashSet<>();
 
         return new LinkedHashSet<>(section.getKeys(false));
     }
 
     public String getCategoryName(String id) {
-        return data.getString(
-                "categories." + id + ".name",
-                id
-        );
+        return data.getString("categories." + id + ".name", id);
     }
 
     public Material getCategoryIcon(String id) {
         Material material = Material.matchMaterial(
-                data.getString(
-                        "categories." + id + ".icon",
-                        "CHEST"
-                )
+                data.getString("categories." + id + ".icon", "CHEST")
         );
 
         return material == null ? Material.CHEST : material;
     }
 
     public int getCategorySlot(String id) {
-        return data.getInt(
-                "categories." + id + ".slot",
-                0
-        );
+        return data.getInt("categories." + id + ".slot", 0);
     }
 
     public String getCategoryPermission(String id) {
-        return data.getString(
-                "categories." + id + ".permission",
-                ""
-        );
+        return data.getString("categories." + id + ".permission", "");
     }
 
     public boolean createCategory(
@@ -155,13 +163,9 @@ public class ShopManager {
             Material icon,
             int slot
     ) {
-        if (data == null
-                || id == null
-                || id.isBlank()
-                || name == null
-                || icon == null
-                || slot < 0
-                || slot >= 54
+        if (data == null || id == null || id.isBlank()
+                || name == null || icon == null
+                || slot < 0 || slot >= 54
                 || hasCategory(id)) {
             return false;
         }
@@ -182,7 +186,6 @@ public class ShopManager {
         if (!hasCategory(id)) return false;
 
         data.set("categories." + id, null);
-
         save();
         return true;
     }
@@ -192,58 +195,33 @@ public class ShopManager {
     }
 
     public void setCategoryName(String category, String name) {
-        if (!hasCategory(category)
-                || name == null
-                || name.isBlank()) {
-            return;
-        }
+        if (!hasCategory(category) || name == null || name.isBlank()) return;
 
-        data.set(
-                "categories." + category + ".name",
-                name
-        );
-
+        data.set("categories." + category + ".name", name);
         save();
     }
 
-    public void setCategoryIcon(
-            String category,
-            Material material
-    ) {
+    public void setCategoryIcon(String category, Material material) {
         if (!hasCategory(category) || material == null) return;
 
-        data.set(
-                "categories." + category + ".icon",
-                material.name()
-        );
-
+        data.set("categories." + category + ".icon", material.name());
         save();
     }
 
     public void setCategorySlot(String category, int slot) {
-        if (!hasCategory(category) || slot < 0 || slot >= 54) {
-            return;
-        }
+        if (!hasCategory(category) || slot < 0 || slot >= 54) return;
 
         for (String other : getCategories()) {
-            if (!other.equals(category)
-                    && getCategorySlot(other) == slot) {
+            if (!other.equals(category) && getCategorySlot(other) == slot) {
                 return;
             }
         }
 
-        data.set(
-                "categories." + category + ".slot",
-                slot
-        );
-
+        data.set("categories." + category + ".slot", slot);
         save();
     }
 
-    public void setCategoryPermission(
-            String category,
-            String permission
-    ) {
+    public void setCategoryPermission(String category, String permission) {
         if (!hasCategory(category)) return;
 
         data.set(
@@ -259,18 +237,14 @@ public class ShopManager {
     // =========================================================
 
     public Set<String> getItems(String category) {
-        if (!hasCategory(category)) {
-            return new LinkedHashSet<>();
-        }
+        if (!hasCategory(category)) return new LinkedHashSet<>();
 
         ConfigurationSection section =
                 data.getConfigurationSection(
                         "categories." + category + ".items"
                 );
 
-        if (section == null) {
-            return new LinkedHashSet<>();
-        }
+        if (section == null) return new LinkedHashSet<>();
 
         return new LinkedHashSet<>(section.getKeys(false));
     }
@@ -278,41 +252,27 @@ public class ShopManager {
     public ItemStack getItem(String category, String slot) {
         if (!hasItem(category, slot)) return null;
 
-        String path =
-                "categories." + category + ".items." + slot;
+        String path = "categories." + category + ".items." + slot;
 
         Material material = Material.matchMaterial(
                 data.getString(path + ".material", "STONE")
         );
 
-        if (material == null || material.isAir()) {
-            return null;
-        }
+        if (material == null || material.isAir()) return null;
 
-        int amount = Math.max(
-                1,
-                data.getInt(path + ".amount", 1)
-        );
-
+        int amount = Math.max(1, data.getInt(path + ".amount", 1));
         ItemStack item = new ItemStack(material, amount);
 
         ItemMeta meta = item.getItemMeta();
 
         if (meta != null) {
-            String name = data.getString(
-                    path + ".name",
-                    ""
-            );
+            String name = data.getString(path + ".name", "");
 
             if (!name.isEmpty()) {
-                meta.setDisplayName(
-                        plugin.getConfigManager().color(name)
-                );
+                meta.setDisplayName(plugin.getConfigManager().color(name));
             }
 
-            List<String> lore = data.getStringList(
-                    path + ".lore"
-            );
+            List<String> lore = data.getStringList(path + ".lore");
 
             if (!lore.isEmpty()) {
                 meta.setLore(
@@ -342,10 +302,7 @@ public class ShopManager {
         );
     }
 
-    public String getItemPermission(
-            String category,
-            String slot
-    ) {
+    public String getItemPermission(String category, String slot) {
         return data.getString(
                 "categories." + category + ".items." + slot + ".permission",
                 ""
@@ -384,8 +341,7 @@ public class ShopManager {
             return false;
         }
 
-        String path =
-                "categories." + category + ".items." + slot;
+        String path = "categories." + category + ".items." + slot;
 
         data.set(path + ".material", item.getType().name());
         data.set(path + ".amount", item.getAmount());
@@ -395,15 +351,13 @@ public class ShopManager {
         data.set(
                 path + ".name",
                 meta != null && meta.hasDisplayName()
-                        ? meta.getDisplayName()
-                        : ""
+                        ? meta.getDisplayName() : ""
         );
 
         data.set(
                 path + ".lore",
                 meta != null && meta.hasLore()
-                        ? meta.getLore()
-                        : new ArrayList<>()
+                        ? meta.getLore() : new ArrayList<>()
         );
 
         data.set(path + ".buy", buy);
@@ -415,7 +369,7 @@ public class ShopManager {
     }
 
     // =========================================================
-    // UPDATE PRICE
+    // PRICE
     // =========================================================
 
     public boolean updatePrice(
@@ -449,11 +403,7 @@ public class ShopManager {
     public boolean removeItem(String category, String slot) {
         if (!hasItem(category, slot)) return false;
 
-        data.set(
-                "categories." + category + ".items." + slot,
-                null
-        );
-
+        data.set("categories." + category + ".items." + slot, null);
         save();
         return true;
     }
@@ -477,11 +427,7 @@ public class ShopManager {
         save();
     }
 
-    public void setItemName(
-            String category,
-            String slot,
-            String name
-    ) {
+    public void setItemName(String category, String slot, String name) {
         if (!hasItem(category, slot)) return;
 
         data.set(
@@ -524,9 +470,7 @@ public class ShopManager {
 
         String newSlotString = String.valueOf(newSlot);
 
-        if (hasItem(category, newSlotString)) {
-            return;
-        }
+        if (hasItem(category, newSlotString)) return;
 
         String oldPath =
                 "categories." + category + ".items." + oldSlot;
@@ -534,13 +478,13 @@ public class ShopManager {
         String newPath =
                 "categories." + category + ".items." + newSlotString;
 
-        ConfigurationSection oldSection =
+        ConfigurationSection section =
                 data.getConfigurationSection(oldPath);
 
-        if (oldSection == null) return;
+        if (section == null) return;
 
         Map<String, Object> values =
-                new LinkedHashMap<>(oldSection.getValues(true));
+                new LinkedHashMap<>(section.getValues(true));
 
         data.set(newPath, values);
         data.set(oldPath, null);
