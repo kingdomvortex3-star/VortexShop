@@ -39,7 +39,7 @@ public class TransactionManager {
         if (permission != null && !permission.isBlank()
                 && !player.hasPermission(permission)
                 && !player.hasPermission("vortexshop.bypass")) {
-            send(player, "&cKamu tidak memiliki permission untuk item ini!");
+            send(player, "&cKamu tidak memiliki permission!");
             return false;
         }
 
@@ -54,7 +54,7 @@ public class TransactionManager {
         double total = unitPrice * amount;
 
         if (!validPrice(unitPrice) || !validPrice(total)) {
-            send(player, "&cHarga beli item belum diatur atau tidak valid!");
+            send(player, "&cHarga beli tidak valid!");
             return false;
         }
 
@@ -70,7 +70,7 @@ public class TransactionManager {
         }
 
         if (!plugin.getEconomyManager().withdraw(player, total)) {
-            send(player, "&cTransaksi gagal. Uang tidak berhasil dipotong!");
+            send(player, "&cPembayaran gagal!");
             return false;
         }
 
@@ -87,7 +87,7 @@ public class TransactionManager {
 
         send(player, "&aBerhasil membeli &f" + amount + "x "
                 + template.getType().name()
-                + " &adengan harga &e"
+                + " &aseharga &e"
                 + plugin.getEconomyManager().format(total));
 
         playSound(player, "sounds.purchase");
@@ -116,26 +116,43 @@ public class TransactionManager {
     }
 
     // =========================================================
-    // EXACT SHOP MATCH
+    // STRICT SHOP ITEM MATCH
     // =========================================================
 
-    /**
-     * Item harus sama persis dengan template Shop.
-     * Material dan seluruh metadata harus cocok.
-     * Jumlah stack tidak memengaruhi pencocokan.
-     */
     private boolean matchesShopItem(ItemStack template, ItemStack item) {
         if (template == null || item == null) return false;
-        if (template.getType().isAir() || item.getType().isAir()) return false;
 
+        if (template.getType().isAir() || item.getType().isAir()) {
+            return false;
+        }
+
+        // Harus cocok dengan item Shop secara penuh.
+        // isSimilar mengabaikan jumlah stack, tetapi membandingkan
+        // material dan metadata item.
         return template.isSimilar(item);
     }
 
-    /**
-     * Mengembalikan harga jual total untuk stack.
-     * Item yang tidak ditemukan di Shop atau harga jual <= 0
-     * tidak dapat dijual.
-     */
+    private boolean isBlacklisted(ItemStack item) {
+        if (item == null) return true;
+
+        List<String> blacklist = plugin.getConfig()
+                .getStringList("settings.sell-blacklist");
+
+        return blacklist.contains(item.getType().name());
+    }
+
+    private boolean validPrice(double price) {
+        return Double.isFinite(price) && price >= 0;
+    }
+
+    private boolean validSellPrice(double price) {
+        return Double.isFinite(price) && price > 0;
+    }
+
+    // =========================================================
+    // CALCULATE SELL PRICE
+    // =========================================================
+
     public double calculateSellPrice(ItemStack item) {
         if (item == null || item.getType().isAir()) return 0;
         if (isBlacklisted(item)) return 0;
@@ -144,13 +161,18 @@ public class TransactionManager {
 
         for (String category : shop.getCategories()) {
             for (String slot : shop.getItems(category)) {
+
                 ItemStack template = shop.getItem(category, slot);
 
-                if (!matchesShopItem(template, item)) continue;
+                if (!matchesShopItem(template, item)) {
+                    continue;
+                }
 
                 double unitPrice = shop.getSellPrice(category, slot);
 
-                if (!validSellPrice(unitPrice)) return 0;
+                if (!validSellPrice(unitPrice)) {
+                    return 0;
+                }
 
                 double total = unitPrice * item.getAmount();
 
@@ -158,14 +180,8 @@ public class TransactionManager {
             }
         }
 
+        // Item tidak ditemukan di Shop.
         return 0;
-    }
-
-    private boolean isBlacklisted(ItemStack item) {
-        List<String> blacklist = plugin.getConfig()
-                .getStringList("settings.sell-blacklist");
-
-        return blacklist.contains(item.getType().name());
     }
 
     // =========================================================
@@ -180,19 +196,17 @@ public class TransactionManager {
     ) {
         ShopManager shop = plugin.getShopManager();
 
-        if (!shop.hasItem(category, slot)) {
+        if (!shop.hasItem(category, slot) || amount <= 0) {
             send(player, "&cItem tidak terdaftar di Shop!");
             return false;
         }
-
-        if (amount <= 0) return false;
 
         String permission = shop.getItemPermission(category, slot);
 
         if (permission != null && !permission.isBlank()
                 && !player.hasPermission(permission)
                 && !player.hasPermission("vortexshop.bypass")) {
-            send(player, "&cKamu tidak memiliki permission untuk item ini!");
+            send(player, "&cKamu tidak memiliki permission!");
             return false;
         }
 
@@ -215,10 +229,10 @@ public class TransactionManager {
             return false;
         }
 
+        ItemStack[] contents = player.getInventory().getStorageContents();
+
         int remaining = amount;
         List<Integer> selectedSlots = new ArrayList<>();
-
-        ItemStack[] contents = player.getInventory().getStorageContents();
 
         for (int i = 0; i < contents.length; i++) {
             ItemStack content = contents[i];
@@ -232,11 +246,10 @@ public class TransactionManager {
         }
 
         if (remaining > 0) {
-            send(player, "&cItem tidak cukup atau item tidak cocok dengan Shop!");
+            send(player, "&cItem tidak cukup atau tidak cocok dengan Shop!");
             return false;
         }
 
-        // Bayar dahulu agar item tidak hilang jika pembayaran gagal.
         if (!plugin.getEconomyManager().deposit(player, total)) {
             send(player, "&cPembayaran gagal. Item tetap aman!");
             return false;
@@ -296,7 +309,7 @@ public class TransactionManager {
             total += price;
 
             if (!Double.isFinite(total)) {
-                send(player, "&cTotal harga jual tidak valid!");
+                send(player, "&cTotal harga tidak valid!");
                 return false;
             }
 
@@ -319,23 +332,11 @@ public class TransactionManager {
 
         player.getInventory().setStorageContents(contents);
 
-        send(player, "&aBerhasil menjual semua item Shop seharga &e"
+        send(player, "&aBerhasil menjual item Shop seharga &e"
                 + plugin.getEconomyManager().format(total));
 
         playSound(player, "sounds.sell");
         return true;
-    }
-
-    // =========================================================
-    // VALIDATION
-    // =========================================================
-
-    private boolean validPrice(double price) {
-        return Double.isFinite(price) && price >= 0;
-    }
-
-    private boolean validSellPrice(double price) {
-        return Double.isFinite(price) && price > 0;
     }
 
     // =========================================================
