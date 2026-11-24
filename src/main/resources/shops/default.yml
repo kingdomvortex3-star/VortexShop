@@ -1,0 +1,58 @@
+
+categories:
+  blocks:
+    name: "&bBlocks"
+    icon: BRICKS
+    slot: 20
+    permission: ""
+    items:
+      10:
+        material: STONE
+        amount: 1
+        name: "&fStone"
+        lore:
+          - "&7Building Material"
+        buy: 10.0
+        sell: 2.0
+        permission: ""
+      11:
+        material: DIRT
+        amount: 1
+        name: "&aDirt"
+        lore:
+          - "&7Basic Block"
+        buy: 5.0
+        sell: 1.0
+        permission: ""
+
+  farming:
+    name: "&aFarming"
+    icon: WHEAT
+    slot: 22
+    permission: ""
+    items:
+      10:
+        material: WHEAT
+        amount: 1
+        name: "&eWheat"
+        lore:
+          - "&7Farming Item"
+        buy: 15.0
+        sell: 5.0
+        permission: ""
+
+  minerals:
+    name: "&6Minerals"
+    icon: DIAMOND
+    slot: 24
+    permission: ""
+    items:
+      10:
+        material: DIAMOND
+        amount: 1
+        name: "&bDiamond"
+        lore:
+          - "&7Rare Mineral"
+        buy: 500.0
+        sell: 250.0
+        permission: ""
