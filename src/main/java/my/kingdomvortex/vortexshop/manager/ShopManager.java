@@ -6,6 +6,7 @@ import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 
 import java.io.File;
 import java.io.IOException;
@@ -14,6 +15,7 @@ import java.util.*;
 public class ShopManager {
 
     private final VortexShop plugin;
+
     private File file;
     private YamlConfiguration data;
 
@@ -21,18 +23,70 @@ public class ShopManager {
         this.plugin = plugin;
     }
 
+    // =========================================================
+    // LOAD
+    // =========================================================
+
     public void load() {
         File folder = new File(plugin.getDataFolder(), "shops");
-        if (!folder.exists()) folder.mkdirs();
+
+        if (!folder.exists() && !folder.mkdirs()) {
+            plugin.getLogger().severe(
+                    "Failed to create shops directory!"
+            );
+            return;
+        }
 
         file = new File(folder, "default.yml");
 
         if (!file.exists()) {
-            plugin.saveResource("shops/default.yml", false);
+            try {
+                plugin.saveResource("shops/default.yml", false);
+            } catch (IllegalArgumentException exception) {
+                plugin.getLogger().warning(
+                        "Default shop resource not found. Creating empty shop."
+                );
+
+                data = new YamlConfiguration();
+                data.createSection("categories");
+                save();
+                return;
+            }
         }
 
         data = YamlConfiguration.loadConfiguration(file);
+
+        if (data.getConfigurationSection("categories") == null
+                && !data.contains("categories")) {
+            data.createSection("categories");
+            save();
+        }
+
+        logShopInformation();
     }
+
+    private void logShopInformation() {
+        Set<String> categories = getCategories();
+
+        plugin.getLogger().info("----------------------------------");
+        plugin.getLogger().info("VortexShop Shop Data");
+        plugin.getLogger().info(
+                "File: " + file.getAbsolutePath()
+        );
+        plugin.getLogger().info(
+                "Loaded categories: " + categories.size()
+        );
+
+        for (String category : categories) {
+            plugin.getLogger().info(" - " + category);
+        }
+
+        plugin.getLogger().info("----------------------------------");
+    }
+
+    // =========================================================
+    // SAVE
+    // =========================================================
 
     public void save() {
         if (data == null || file == null) return;
@@ -46,33 +100,69 @@ public class ShopManager {
         }
     }
 
+    // =========================================================
+    // CATEGORY
+    // =========================================================
+
     public Set<String> getCategories() {
-        ConfigurationSection section = data.getConfigurationSection("categories");
-        return section == null ? new LinkedHashSet<>() : section.getKeys(false);
+        if (data == null) return new LinkedHashSet<>();
+
+        ConfigurationSection section =
+                data.getConfigurationSection("categories");
+
+        if (section == null) {
+            return new LinkedHashSet<>();
+        }
+
+        return new LinkedHashSet<>(section.getKeys(false));
     }
 
     public String getCategoryName(String id) {
-        return data.getString("categories." + id + ".name", id);
+        return data.getString(
+                "categories." + id + ".name",
+                id
+        );
     }
 
     public Material getCategoryIcon(String id) {
         Material material = Material.matchMaterial(
-                data.getString("categories." + id + ".icon", "CHEST")
+                data.getString(
+                        "categories." + id + ".icon",
+                        "CHEST"
+                )
         );
 
         return material == null ? Material.CHEST : material;
     }
 
     public int getCategorySlot(String id) {
-        return data.getInt("categories." + id + ".slot", 0);
+        return data.getInt(
+                "categories." + id + ".slot",
+                0
+        );
     }
 
     public String getCategoryPermission(String id) {
-        return data.getString("categories." + id + ".permission", "");
+        return data.getString(
+                "categories." + id + ".permission",
+                ""
+        );
     }
 
-    public boolean createCategory(String id, String name, Material icon, int slot) {
-        if (id == null || id.isBlank() || getCategories().contains(id)) {
+    public boolean createCategory(
+            String id,
+            String name,
+            Material icon,
+            int slot
+    ) {
+        if (data == null
+                || id == null
+                || id.isBlank()
+                || name == null
+                || icon == null
+                || slot < 0
+                || slot >= 54
+                || hasCategory(id)) {
             return false;
         }
 
@@ -89,53 +179,147 @@ public class ShopManager {
     }
 
     public boolean deleteCategory(String id) {
-        if (!getCategories().contains(id)) return false;
+        if (!hasCategory(id)) return false;
 
         data.set("categories." + id, null);
+
         save();
         return true;
     }
 
     public boolean hasCategory(String id) {
-        return getCategories().contains(id);
+        return id != null && getCategories().contains(id);
     }
 
-    public Set<String> getItems(String category) {
-        ConfigurationSection section =
-                data.getConfigurationSection("categories." + category + ".items");
+    public void setCategoryName(String category, String name) {
+        if (!hasCategory(category)
+                || name == null
+                || name.isBlank()) {
+            return;
+        }
 
-        return section == null ? new LinkedHashSet<>() : section.getKeys(false);
+        data.set(
+                "categories." + category + ".name",
+                name
+        );
+
+        save();
+    }
+
+    public void setCategoryIcon(
+            String category,
+            Material material
+    ) {
+        if (!hasCategory(category) || material == null) return;
+
+        data.set(
+                "categories." + category + ".icon",
+                material.name()
+        );
+
+        save();
+    }
+
+    public void setCategorySlot(String category, int slot) {
+        if (!hasCategory(category) || slot < 0 || slot >= 54) {
+            return;
+        }
+
+        for (String other : getCategories()) {
+            if (!other.equals(category)
+                    && getCategorySlot(other) == slot) {
+                return;
+            }
+        }
+
+        data.set(
+                "categories." + category + ".slot",
+                slot
+        );
+
+        save();
+    }
+
+    public void setCategoryPermission(
+            String category,
+            String permission
+    ) {
+        if (!hasCategory(category)) return;
+
+        data.set(
+                "categories." + category + ".permission",
+                permission == null ? "" : permission
+        );
+
+        save();
+    }
+
+    // =========================================================
+    // ITEMS
+    // =========================================================
+
+    public Set<String> getItems(String category) {
+        if (!hasCategory(category)) {
+            return new LinkedHashSet<>();
+        }
+
+        ConfigurationSection section =
+                data.getConfigurationSection(
+                        "categories." + category + ".items"
+                );
+
+        if (section == null) {
+            return new LinkedHashSet<>();
+        }
+
+        return new LinkedHashSet<>(section.getKeys(false));
     }
 
     public ItemStack getItem(String category, String slot) {
-        String path = "categories." + category + ".items." + slot;
+        if (!hasItem(category, slot)) return null;
+
+        String path =
+                "categories." + category + ".items." + slot;
 
         Material material = Material.matchMaterial(
                 data.getString(path + ".material", "STONE")
         );
 
-        if (material == null) return null;
+        if (material == null || material.isAir()) {
+            return null;
+        }
 
-        ItemStack item = new ItemStack(
-                material,
-                Math.max(1, data.getInt(path + ".amount", 1))
+        int amount = Math.max(
+                1,
+                data.getInt(path + ".amount", 1)
         );
 
-        org.bukkit.inventory.meta.ItemMeta meta = item.getItemMeta();
+        ItemStack item = new ItemStack(material, amount);
+
+        ItemMeta meta = item.getItemMeta();
 
         if (meta != null) {
-            String name = data.getString(path + ".name", "");
+            String name = data.getString(
+                    path + ".name",
+                    ""
+            );
 
             if (!name.isEmpty()) {
-                meta.setDisplayName(plugin.getConfigManager().color(name));
+                meta.setDisplayName(
+                        plugin.getConfigManager().color(name)
+                );
             }
 
-            List<String> lore = data.getStringList(path + ".lore");
+            List<String> lore = data.getStringList(
+                    path + ".lore"
+            );
 
             if (!lore.isEmpty()) {
-                meta.setLore(lore.stream()
-                        .map(plugin.getConfigManager()::color)
-                        .toList());
+                meta.setLore(
+                        lore.stream()
+                                .map(plugin.getConfigManager()::color)
+                                .toList()
+                );
             }
 
             item.setItemMeta(meta);
@@ -146,44 +330,82 @@ public class ShopManager {
 
     public double getBuyPrice(String category, String slot) {
         return data.getDouble(
-                "categories." + category + ".items." + slot + ".buy", -1
+                "categories." + category + ".items." + slot + ".buy",
+                -1
         );
     }
 
     public double getSellPrice(String category, String slot) {
         return data.getDouble(
-                "categories." + category + ".items." + slot + ".sell", -1
+                "categories." + category + ".items." + slot + ".sell",
+                -1
         );
     }
 
-    public String getItemPermission(String category, String slot) {
+    public String getItemPermission(
+            String category,
+            String slot
+    ) {
         return data.getString(
-                "categories." + category + ".items." + slot + ".permission", ""
+                "categories." + category + ".items." + slot + ".permission",
+                ""
         );
     }
 
-    public boolean addItem(String category, int slot, ItemStack item,
-                            double buy, double sell) {
+    public boolean hasItem(String category, String slot) {
+        return hasCategory(category)
+                && slot != null
+                && data.contains(
+                        "categories." + category + ".items." + slot
+                );
+    }
 
-        if (!hasCategory(category) || item == null ||
-                item.getType().isAir() || slot < 0 || slot > 53 ||
-                !Double.isFinite(buy) || !Double.isFinite(sell) ||
-                buy < 0 || sell < 0) {
+    // =========================================================
+    // ADD ITEM
+    // =========================================================
+
+    public boolean addItem(
+            String category,
+            int slot,
+            ItemStack item,
+            double buy,
+            double sell
+    ) {
+        if (!hasCategory(category)
+                || item == null
+                || item.getType().isAir()
+                || slot < 0
+                || slot >= 45
+                || hasItem(category, String.valueOf(slot))
+                || !Double.isFinite(buy)
+                || !Double.isFinite(sell)
+                || buy < 0
+                || sell < 0) {
             return false;
         }
 
-        String path = "categories." + category + ".items." + slot;
+        String path =
+                "categories." + category + ".items." + slot;
 
         data.set(path + ".material", item.getType().name());
         data.set(path + ".amount", item.getAmount());
-        data.set(path + ".name",
-                item.hasItemMeta() && item.getItemMeta().hasDisplayName()
-                        ? item.getItemMeta().getDisplayName()
-                        : "");
-        data.set(path + ".lore",
-                item.hasItemMeta() && item.getItemMeta().hasLore()
-                        ? item.getItemMeta().getLore()
-                        : new ArrayList<>());
+
+        ItemMeta meta = item.getItemMeta();
+
+        data.set(
+                path + ".name",
+                meta != null && meta.hasDisplayName()
+                        ? meta.getDisplayName()
+                        : ""
+        );
+
+        data.set(
+                path + ".lore",
+                meta != null && meta.hasLore()
+                        ? meta.getLore()
+                        : new ArrayList<>()
+        );
+
         data.set(path + ".buy", buy);
         data.set(path + ".sell", sell);
         data.set(path + ".permission", "");
@@ -192,91 +414,149 @@ public class ShopManager {
         return true;
     }
 
-    public boolean updatePrice(String category, String slot,
-                                String type, double price) {
-        if (!hasItem(category, slot) ||
-                !Double.isFinite(price) || price < 0 ||
-                (!type.equalsIgnoreCase("buy") &&
-                 !type.equalsIgnoreCase("sell"))) {
+    // =========================================================
+    // UPDATE PRICE
+    // =========================================================
+
+    public boolean updatePrice(
+            String category,
+            String slot,
+            String type,
+            double price
+    ) {
+        if (!hasItem(category, slot)
+                || !Double.isFinite(price)
+                || price < 0
+                || (!type.equalsIgnoreCase("buy")
+                && !type.equalsIgnoreCase("sell"))) {
             return false;
         }
 
-        data.set("categories." + category + ".items." + slot + "." +
-                type.toLowerCase(Locale.ROOT), price);
+        data.set(
+                "categories." + category + ".items." + slot + "."
+                        + type.toLowerCase(Locale.ROOT),
+                price
+        );
 
         save();
         return true;
     }
 
-    public boolean hasItem(String category, String slot) {
-        return data.contains("categories." + category + ".items." + slot);
-    }
+    // =========================================================
+    // REMOVE ITEM
+    // =========================================================
 
     public boolean removeItem(String category, String slot) {
         if (!hasItem(category, slot)) return false;
 
-        data.set("categories." + category + ".items." + slot, null);
+        data.set(
+                "categories." + category + ".items." + slot,
+                null
+        );
+
         save();
         return true;
     }
 
-    public void setCategoryPermission(String category, String permission) {
-        data.set("categories." + category + ".permission", permission);
-        save();
-    }
+    // =========================================================
+    // ITEM SETTINGS
+    // =========================================================
 
-    public void setItemPermission(String category, String slot, String permission) {
+    public void setItemPermission(
+            String category,
+            String slot,
+            String permission
+    ) {
         if (!hasItem(category, slot)) return;
 
-        data.set("categories." + category + ".items." + slot + ".permission",
-                permission);
+        data.set(
+                "categories." + category + ".items." + slot + ".permission",
+                permission == null ? "" : permission
+        );
+
         save();
     }
 
-    public void setItemName(String category, String slot, String name) {
+    public void setItemName(
+            String category,
+            String slot,
+            String name
+    ) {
         if (!hasItem(category, slot)) return;
 
-        data.set("categories." + category + ".items." + slot + ".name", name);
+        data.set(
+                "categories." + category + ".items." + slot + ".name",
+                name == null ? "" : name
+        );
+
         save();
     }
 
-    public void setItemLore(String category, String slot, List<String> lore) {
+    public void setItemLore(
+            String category,
+            String slot,
+            List<String> lore
+    ) {
         if (!hasItem(category, slot)) return;
 
-        data.set("categories." + category + ".items." + slot + ".lore", lore);
+        data.set(
+                "categories." + category + ".items." + slot + ".lore",
+                lore == null ? new ArrayList<>() : lore
+        );
+
         save();
     }
 
-    public void setCategoryName(String category, String name) {
-        if (!hasCategory(category)) return;
+    // =========================================================
+    // MOVE ITEM
+    // =========================================================
 
-        data.set("categories." + category + ".name", name);
-        save();
-    }
+    public void setItemSlot(
+            String category,
+            String oldSlot,
+            int newSlot
+    ) {
+        if (!hasItem(category, oldSlot)
+                || newSlot < 0
+                || newSlot >= 45) {
+            return;
+        }
 
-    public void setCategoryIcon(String category, Material material) {
-        if (!hasCategory(category)) return;
+        String newSlotString = String.valueOf(newSlot);
 
-        data.set("categories." + category + ".icon", material.name());
-        save();
-    }
+        if (hasItem(category, newSlotString)) {
+            return;
+        }
 
-    public void setCategorySlot(String category, int slot) {
-        if (!hasCategory(category) || slot < 0 || slot > 53) return;
+        String oldPath =
+                "categories." + category + ".items." + oldSlot;
 
-        data.set("categories." + category + ".slot", slot);
-        save();
-    }
+        String newPath =
+                "categories." + category + ".items." + newSlotString;
 
-    public void setItemSlot(String category, String oldSlot, int newSlot) {
-        if (!hasItem(category, oldSlot) || newSlot < 0 || newSlot > 53 ||
-                hasItem(category, String.valueOf(newSlot))) return;
+        ConfigurationSection oldSection =
+                data.getConfigurationSection(oldPath);
 
-        String oldPath = "categories." + category + ".items." + oldSlot;
-        String newPath = "categories." + category + ".items." + newSlot;
+        if (oldSection == null) return;
 
-        data.set(newPath, data.getConfigurationSection(oldPath).getValues(true));
+        Map<String, Object> values =
+                new LinkedHashMap<>(oldSection.getValues(true));
+
+        data.set(newPath, values);
         data.set(oldPath, null);
+
         save();
+    }
+
+    // =========================================================
+    // DEBUG
+    // =========================================================
+
+    public File getShopFile() {
+        return file;
+    }
+
+    public int getCategoryCount() {
+        return getCategories().size();
     }
 }
