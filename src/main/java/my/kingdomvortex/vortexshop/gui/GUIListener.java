@@ -8,7 +8,6 @@ import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
@@ -25,7 +24,8 @@ public class GUIListener implements Listener {
     private final GUIManager gui;
 
     private final Map<UUID, String> chatActions = new ConcurrentHashMap<>();
-    private final Map<UUID, Inventory> sellInventories = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> pendingAmounts = new ConcurrentHashMap<>();
+    private final Map<UUID, Inventory> pendingSell = new ConcurrentHashMap<>();
 
     public GUIListener(VortexShop plugin) {
         this.plugin = plugin;
@@ -53,28 +53,29 @@ public class GUIListener implements Listener {
         if (slot < 0 || slot >= top.getSize()) return;
 
         switch (type) {
-            case "MAIN" ->
-                    handleMain(player, slot);
-
-            case "CATEGORY" ->
-                    handleCategory(player, holder, slot, event);
-
-            case "EDITOR" ->
-                    handleEditor(player, slot);
-
+            case "MAIN" -> handleMain(player, slot);
+            case "CATEGORY" -> handleCategory(player, holder, slot, event);
+            case "EDITOR" -> handleEditor(player, slot);
             case "CATEGORIES_EDITOR" ->
                     handleCategoriesEditor(player, slot, event);
-
             case "CATEGORY_EDITOR" ->
                     handleCategoryEditor(player, holder, slot, event);
-
             case "ITEM_EDITOR" ->
                     handleItemEditor(player, holder, slot);
-
+            case "QUANTITY" ->
+                    handleQuantity(player, holder, slot);
+            case "BUY_CONFIRM" ->
+                    handleBuyConfirm(player, holder, slot);
+            case "SELL_CONFIRM" ->
+                    handleSellConfirm(player, slot);
             default -> {
             }
         }
     }
+
+    // =========================================================
+    // MAIN SHOP
+    // =========================================================
 
     private void handleMain(Player player, int slot) {
         ShopManager shop = plugin.getShopManager();
@@ -87,8 +88,7 @@ public class GUIListener implements Listener {
             if (permission != null && !permission.isBlank()
                     && !player.hasPermission(permission)
                     && !player.hasPermission("vortexshop.bypass")) {
-                player.sendMessage(plugin.getConfigManager().getPrefix()
-                        + plugin.getConfigManager().color("&cKamu tidak memiliki akses."));
+                send(player, "&cKamu tidak memiliki akses ke kategori ini.");
                 return;
             }
 
@@ -96,6 +96,10 @@ public class GUIListener implements Listener {
             return;
         }
     }
+
+    // =========================================================
+    // CATEGORY SHOP
+    // =========================================================
 
     private void handleCategory(
             Player player,
@@ -108,56 +112,64 @@ public class GUIListener implements Listener {
             return;
         }
 
-        String category = holder.getCategory();
+        if (slot < 0 || slot >= 45) return;
 
-        if (category == null) return;
+        String category = holder.getCategory();
+        String itemSlot = String.valueOf(slot);
 
         ShopManager shop = plugin.getShopManager();
 
-        String itemSlot = String.valueOf(slot);
-
         if (!shop.hasItem(category, itemSlot)) return;
 
-        if (event.isRightClick()) {
-            int amount = event.isShiftClick() ? 64 : 1;
+        String permission = shop.getItemPermission(category, itemSlot);
 
-            plugin.getTransactionManager().sellItem(
-                    player,
-                    category,
-                    itemSlot,
-                    amount
-            );
-
-            gui.openCategory(player, category);
+        if (permission != null && !permission.isBlank()
+                && !player.hasPermission(permission)
+                && !player.hasPermission("vortexshop.bypass")) {
+            send(player, "&cKamu tidak memiliki permission untuk item ini.");
             return;
         }
 
         if (event.isLeftClick()) {
             gui.openQuantity(player, category, itemSlot);
+            return;
+        }
+
+        if (event.isRightClick()) {
+            if (plugin.getTransactionManager().sellItem(
+                    player, category, itemSlot, 1
+            )) {
+                gui.openCategory(player, category);
+            }
         }
     }
 
+    // =========================================================
+    // EDITOR MAIN
+    // =========================================================
+
     private void handleEditor(Player player, int slot) {
         switch (slot) {
-            case 10, 14 ->
-                    gui.openCategoriesEditor(player);
+            case 10 -> gui.openCategoriesEditor(player);
 
             case 12 -> {
                 plugin.reloadPlugin();
-
-                player.sendMessage(plugin.getConfigManager().getPrefix()
-                        + plugin.getConfigManager().getMessage("reloaded"));
-
+                send(player, "&aVortexShop berhasil di-reload.");
                 gui.openEditor(player);
             }
 
-            case 16 ->
-                    player.closeInventory();
+            case 14 -> gui.openMain(player);
+
+            case 16 -> player.closeInventory();
 
             default -> {
             }
         }
     }
+
+    // =========================================================
+    // CATEGORY LIST EDITOR
+    // =========================================================
 
     private void handleCategoriesEditor(
             Player player,
@@ -185,8 +197,7 @@ public class GUIListener implements Listener {
 
         if (event.isRightClick()) {
             if (plugin.getShopManager().deleteCategory(category)) {
-                player.sendMessage(plugin.getConfigManager().getPrefix()
-                        + plugin.getConfigManager().color("&cKategori berhasil dihapus."));
+                send(player, "&cKategori &f" + category + " &cberhasil dihapus.");
             }
 
             gui.openCategoriesEditor(player);
@@ -195,6 +206,10 @@ public class GUIListener implements Listener {
 
         gui.openCategoryEditor(player, category);
     }
+
+    // =========================================================
+    // CATEGORY EDITOR
+    // =========================================================
 
     private void handleCategoryEditor(
             Player player,
@@ -208,32 +223,33 @@ public class GUIListener implements Listener {
 
         ShopManager shop = plugin.getShopManager();
 
+        if (!shop.hasCategory(category)) {
+            gui.openCategoriesEditor(player);
+            return;
+        }
+
         if (slot == 49) {
             gui.openCategoriesEditor(player);
             return;
         }
 
         if (slot == 51) {
+            requestChat(player, "CATEGORY_SETTINGS:" + category);
+            return;
+        }
+
+        if (slot == 53) {
             ItemStack hand = player.getInventory().getItemInMainHand();
 
             if (hand.getType().isAir()) {
-                player.sendMessage(plugin.getConfigManager().getPrefix()
-                        + plugin.getConfigManager().color("&cPegang item terlebih dahulu."));
+                send(player, "&cPegang item terlebih dahulu.");
                 return;
             }
 
-            int emptySlot = -1;
-
-            for (int i = 0; i < 45; i++) {
-                if (!shop.hasItem(category, String.valueOf(i))) {
-                    emptySlot = i;
-                    break;
-                }
-            }
+            int emptySlot = findEmptyItemSlot(category);
 
             if (emptySlot == -1) {
-                player.sendMessage(plugin.getConfigManager().getPrefix()
-                        + plugin.getConfigManager().color("&cTidak ada slot item kosong."));
+                send(player, "&cTidak ada slot item kosong.");
                 return;
             }
 
@@ -241,22 +257,10 @@ public class GUIListener implements Listener {
             copy.setAmount(1);
 
             if (shop.addItem(category, emptySlot, copy, 0, 0)) {
-                player.sendMessage(plugin.getConfigManager().getPrefix()
-                        + plugin.getConfigManager().color("&aItem berhasil ditambahkan."));
-
+                send(player, "&aItem berhasil ditambahkan.");
                 gui.openItemEditor(player, category, String.valueOf(emptySlot));
             }
 
-            return;
-        }
-
-        if (slot == 53) {
-            if (shop.deleteCategory(category)) {
-                player.sendMessage(plugin.getConfigManager().getPrefix()
-                        + plugin.getConfigManager().color("&cKategori berhasil dihapus."));
-            }
-
-            gui.openCategoriesEditor(player);
             return;
         }
 
@@ -264,40 +268,48 @@ public class GUIListener implements Listener {
 
         String itemSlot = String.valueOf(slot);
 
-        if (!shop.hasItem(category, itemSlot)) {
-            ItemStack hand = player.getInventory().getItemInMainHand();
-
-            if (hand.getType().isAir()) {
-                player.sendMessage(plugin.getConfigManager().getPrefix()
-                        + plugin.getConfigManager().color("&cPegang item untuk menambahkannya."));
-                return;
-            }
-
-            ItemStack copy = hand.clone();
-            copy.setAmount(1);
-
-            if (shop.addItem(category, slot, copy, 0, 0)) {
-                player.sendMessage(plugin.getConfigManager().getPrefix()
-                        + plugin.getConfigManager().color("&aItem berhasil ditambahkan."));
-
+        if (shop.hasItem(category, itemSlot)) {
+            if (event.isRightClick()) {
+                shop.removeItem(category, itemSlot);
+                send(player, "&cItem berhasil dihapus.");
+                gui.openCategoryEditor(player, category);
+            } else {
                 gui.openItemEditor(player, category, itemSlot);
             }
-
             return;
         }
 
-        if (event.isRightClick()) {
-            shop.removeItem(category, itemSlot);
+        ItemStack hand = player.getInventory().getItemInMainHand();
 
-            player.sendMessage(plugin.getConfigManager().getPrefix()
-                    + plugin.getConfigManager().color("&cItem berhasil dihapus."));
-
-            gui.openCategoryEditor(player, category);
+        if (hand.getType().isAir()) {
+            send(player, "&cPegang item untuk menambahkannya ke slot ini.");
             return;
         }
 
-        gui.openItemEditor(player, category, itemSlot);
+        ItemStack copy = hand.clone();
+        copy.setAmount(1);
+
+        if (shop.addItem(category, slot, copy, 0, 0)) {
+            send(player, "&aItem berhasil ditambahkan.");
+            gui.openItemEditor(player, category, itemSlot);
+        }
     }
+
+    private int findEmptyItemSlot(String category) {
+        ShopManager shop = plugin.getShopManager();
+
+        for (int i = 0; i < 45; i++) {
+            if (!shop.hasItem(category, String.valueOf(i))) {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    // =========================================================
+    // ITEM EDITOR
+    // =========================================================
 
     private void handleItemEditor(
             Player player,
@@ -317,8 +329,7 @@ public class GUIListener implements Listener {
         }
 
         switch (slot) {
-            case 18, 22 ->
-                    gui.openCategoryEditor(player, category);
+            case 18 -> gui.openCategoryEditor(player, category);
 
             case 10 ->
                     requestChat(player, "BUY_PRICE:" + category + ":" + itemSlot);
@@ -329,25 +340,100 @@ public class GUIListener implements Listener {
             case 14 ->
                     requestChat(player, "ITEM_NAME:" + category + ":" + itemSlot);
 
-            case 16 -> {
-                shop.removeItem(category, itemSlot);
-
-                player.sendMessage(plugin.getConfigManager().getPrefix()
-                        + plugin.getConfigManager().color("&cItem berhasil dihapus."));
-
-                gui.openCategoryEditor(player, category);
-            }
+            case 16 ->
+                    requestChat(player, "ITEM_LORE:" + category + ":" + itemSlot);
 
             case 20 ->
                     requestChat(player, "ITEM_PERMISSION:" + category + ":" + itemSlot);
 
-            case 26 ->
-                    requestChat(player, "ITEM_LORE:" + category + ":" + itemSlot);
+            case 22 ->
+                    requestChat(player, "ITEM_SLOT:" + category + ":" + itemSlot);
+
+            case 26 -> {
+                shop.removeItem(category, itemSlot);
+                send(player, "&cItem berhasil dihapus.");
+                gui.openCategoryEditor(player, category);
+            }
 
             default -> {
             }
         }
     }
+
+    // =========================================================
+    // BUY QUANTITY
+    // =========================================================
+
+    private void handleQuantity(
+            Player player,
+            MenuHolder holder,
+            int slot
+    ) {
+        String category = holder.getCategory();
+        String itemSlot = holder.getSlot();
+
+        if (category == null || itemSlot == null) return;
+
+        if (slot == 22) {
+            gui.openCategory(player, category);
+            return;
+        }
+
+        int amount = switch (slot) {
+            case 10 -> 1;
+            case 12 -> 16;
+            case 14 -> 32;
+            case 16 -> 64;
+            default -> 0;
+        };
+
+        if (amount <= 0) return;
+
+        pendingAmounts.put(player.getUniqueId(), amount);
+        gui.openConfirm(player, category, itemSlot, amount);
+    }
+
+    // =========================================================
+    // BUY CONFIRM
+    // =========================================================
+
+    private void handleBuyConfirm(
+            Player player,
+            MenuHolder holder,
+            int slot
+    ) {
+        String category = holder.getCategory();
+        String itemSlot = holder.getSlot();
+
+        if (category == null || itemSlot == null) return;
+
+        if (slot == 15) {
+            pendingAmounts.remove(player.getUniqueId());
+            gui.openCategory(player, category);
+            return;
+        }
+
+        if (slot != 11) return;
+
+        Integer amount = pendingAmounts.remove(player.getUniqueId());
+
+        if (amount == null) {
+            gui.openCategory(player, category);
+            return;
+        }
+
+        if (plugin.getTransactionManager().buy(
+                player, category, itemSlot, amount
+        )) {
+            gui.openCategory(player, category);
+        } else {
+            gui.openConfirm(player, category, itemSlot, amount);
+        }
+    }
+
+    // =========================================================
+    // SELL GUI
+    // =========================================================
 
     private void handleSellClick(
             InventoryClickEvent event,
@@ -358,50 +444,7 @@ public class GUIListener implements Listener {
 
         if (rawSlot == 49) {
             event.setCancelled(true);
-
-            double total = 0;
-
-            for (int i = 0; i < 45; i++) {
-                ItemStack item = top.getItem(i);
-
-                if (item != null && !item.getType().isAir()) {
-                    total += plugin.getTransactionManager()
-                            .calculateSellPrice(item);
-                }
-            }
-
-            if (total <= 0 || !Double.isFinite(total)) {
-                player.sendMessage(plugin.getConfigManager().getPrefix()
-                        + plugin.getConfigManager().getMessage("no-items"));
-                return;
-            }
-
-            // Sell All diproses hanya setelah pemain mengonfirmasi.
-            Inventory confirm = gui.create(
-                    "SELL_CONFIRM",
-                    null,
-                    null,
-                    "&8✦ &bConfirm Sell All",
-                    27
-            );
-
-            confirm.setItem(11, gui.button(
-                    Material.LIME_WOOL,
-                    "&aConfirm Sell",
-                    List.of(
-                            "&7Total: &e" + plugin.getEconomyManager().format(total),
-                            "&7Klik untuk melanjutkan."
-                    )
-            ));
-
-            confirm.setItem(15, gui.button(
-                    Material.RED_WOOL,
-                    "&cCancel",
-                    List.of("&7Kembali ke Sell GUI.")
-            ));
-
-            sellInventories.put(player.getUniqueId(), top);
-            player.openInventory(confirm);
+            openSellConfirmation(player, top);
             return;
         }
 
@@ -416,58 +459,92 @@ public class GUIListener implements Listener {
             return;
         }
 
-        if (rawSlot < 45) {
-            if (event.getClickedInventory() == top) {
-                event.setCancelled(false);
-                return;
-            }
-
-            // Shift-click dari inventory player ke sell GUI.
-            if (event.isShiftClick()) {
-                event.setCancelled(true);
-
-                ItemStack moving = event.getCurrentItem();
-                if (moving == null || moving.getType().isAir()) return;
-
-                Map<Integer, ItemStack> leftover = top.addItem(moving.clone());
-
-                if (leftover.isEmpty()) {
-                    event.setCurrentItem(null);
-                } else {
-                    int remaining = leftover.values().iterator().next().getAmount();
-                    int moved = moving.getAmount() - remaining;
-
-                    if (moved > 0) {
-                        ItemStack updated = moving.clone();
-                        updated.setAmount(remaining);
-                        event.setCurrentItem(updated);
-                    }
-                }
-                return;
-            }
-
+        if (rawSlot >= 49) {
             event.setCancelled(true);
+            return;
+        }
+
+        if (event.getClickedInventory() == top) {
+            event.setCancelled(false);
+            return;
+        }
+
+        if (event.isShiftClick()) {
+            event.setCancelled(true);
+
+            ItemStack moving = event.getCurrentItem();
+
+            if (moving == null || moving.getType().isAir()) return;
+
+            Map<Integer, ItemStack> leftovers =
+                    top.addItem(moving.clone());
+
+            if (leftovers.isEmpty()) {
+                event.setCurrentItem(null);
+            } else {
+                ItemStack remaining = leftovers.values().iterator().next();
+
+                int moved = moving.getAmount() - remaining.getAmount();
+
+                if (moved > 0) {
+                    ItemStack updated = moving.clone();
+                    updated.setAmount(remaining.getAmount());
+                    event.setCurrentItem(updated);
+                }
+            }
             return;
         }
 
         event.setCancelled(true);
     }
 
-    @EventHandler
-    public void onConfirmClick(InventoryClickEvent event) {
-        if (!(event.getWhoClicked() instanceof Player player)) return;
+    private void openSellConfirmation(Player player, Inventory sellInventory) {
+        double total = 0;
 
-        if (!(event.getView().getTopInventory().getHolder(false)
-                instanceof MenuHolder holder)) return;
+        for (int i = 0; i < 49; i++) {
+            ItemStack item = sellInventory.getItem(i);
 
-        if (!holder.getType().equals("SELL_CONFIRM")) return;
+            if (item == null || item.getType().isAir()) continue;
 
-        event.setCancelled(true);
+            total += plugin.getTransactionManager().calculateSellPrice(item);
+        }
 
-        int slot = event.getRawSlot();
+        if (total <= 0 || !Double.isFinite(total)) {
+            send(player, "&cTidak ada item yang bisa dijual.");
+            return;
+        }
 
+        Inventory confirm = gui.create(
+                "SELL_CONFIRM",
+                null,
+                null,
+                "&8✦ &eConfirm Sell All",
+                27
+        );
+
+        confirm.setItem(11, gui.button(
+                Material.LIME_CONCRETE,
+                "&aConfirm Sell",
+                List.of(
+                        "&7Total: &e" + plugin.getEconomyManager().format(total),
+                        "",
+                        "&eClick to confirm"
+                )
+        ));
+
+        confirm.setItem(15, gui.button(
+                Material.RED_CONCRETE,
+                "&cCancel",
+                List.of("&7Return to Sell GUI")
+        ));
+
+        pendingSell.put(player.getUniqueId(), sellInventory);
+        player.openInventory(confirm);
+    }
+
+    private void handleSellConfirm(Player player, int slot) {
         if (slot == 15) {
-            Inventory sell = sellInventories.remove(player.getUniqueId());
+            Inventory sell = pendingSell.remove(player.getUniqueId());
 
             if (sell != null) {
                 player.openInventory(sell);
@@ -479,43 +556,39 @@ public class GUIListener implements Listener {
 
         if (slot != 11) return;
 
-        Inventory sell = sellInventories.remove(player.getUniqueId());
+        Inventory sell = pendingSell.remove(player.getUniqueId());
 
         if (sell == null) {
             player.closeInventory();
             return;
         }
 
-        ItemStack[] contents = new ItemStack[45];
-
-        for (int i = 0; i < 45; i++) {
-            ItemStack item = sell.getItem(i);
-            contents[i] = item == null ? null : item.clone();
-        }
-
         double total = 0;
 
-        for (ItemStack item : contents) {
+        for (int i = 0; i < 49; i++) {
+            ItemStack item = sell.getItem(i);
+
             if (item == null || item.getType().isAir()) continue;
+
             total += plugin.getTransactionManager().calculateSellPrice(item);
         }
 
         if (total <= 0 || !Double.isFinite(total)) {
-            player.sendMessage(plugin.getConfigManager().getPrefix()
-                    + plugin.getConfigManager().getMessage("no-items"));
+            send(player, "&cTidak ada item yang bisa dijual.");
+            returnItems(player, sell);
             player.closeInventory();
             return;
         }
 
         if (!plugin.getEconomyManager().deposit(player, total)) {
-            player.sendMessage(plugin.getConfigManager().getPrefix()
-                    + plugin.getConfigManager().color("&cPembayaran gagal. Item tetap aman."));
+            send(player, "&cPembayaran gagal. Item tetap aman.");
+            returnItems(player, sell);
             player.closeInventory();
             return;
         }
 
-        for (int i = 0; i < 45; i++) {
-            ItemStack item = contents[i];
+        for (int i = 0; i < 49; i++) {
+            ItemStack item = sell.getItem(i);
 
             if (item == null || item.getType().isAir()) continue;
 
@@ -524,26 +597,29 @@ public class GUIListener implements Listener {
             }
         }
 
-        player.sendMessage(plugin.getConfigManager().getPrefix()
-                + plugin.getConfigManager().getMessage("sell-success")
-                .replace("{price}", plugin.getEconomyManager().format(total)));
+        send(player, "&aBerhasil menjual item seharga &e"
+                + plugin.getEconomyManager().format(total));
 
+        returnItems(player, sell);
         player.closeInventory();
     }
+
+    // =========================================================
+    // CHAT INPUT
+    // =========================================================
 
     private void requestChat(Player player, String action) {
         chatActions.put(player.getUniqueId(), action);
         player.closeInventory();
 
-        player.sendMessage(plugin.getConfigManager().getPrefix()
-                + plugin.getConfigManager().color("&eMasukkan nilai melalui chat."));
-        player.sendMessage(plugin.getConfigManager().getPrefix()
-                + plugin.getConfigManager().color("&7Ketik &ccancel &7untuk membatalkan."));
+        send(player, "&eMasukkan nilai melalui chat.");
+        send(player, "&7Ketik &ccancel &7untuk membatalkan.");
     }
 
     @EventHandler
     public void onChat(AsyncPlayerChatEvent event) {
         Player player = event.getPlayer();
+
         String action = chatActions.remove(player.getUniqueId());
 
         if (action == null) return;
@@ -554,8 +630,7 @@ public class GUIListener implements Listener {
 
         Bukkit.getScheduler().runTask(plugin, () -> {
             if (input.equalsIgnoreCase("cancel")) {
-                player.sendMessage(plugin.getConfigManager().getPrefix()
-                        + plugin.getConfigManager().getMessage("cancelled"));
+                send(player, "&cInput dibatalkan.");
                 return;
             }
 
@@ -563,7 +638,11 @@ public class GUIListener implements Listener {
         });
     }
 
-    private void handleChatInput(Player player, String action, String input) {
+    private void handleChatInput(
+            Player player,
+            String action,
+            String input
+    ) {
         ShopManager shop = plugin.getShopManager();
 
         if (action.equals("CREATE_CATEGORY")) {
@@ -571,15 +650,13 @@ public class GUIListener implements Listener {
                     .replaceAll("[^a-z0-9_-]", "");
 
             if (id.isBlank() || shop.hasCategory(id)) {
-                player.sendMessage(plugin.getConfigManager().getPrefix()
-                        + plugin.getConfigManager().color("&cID kategori tidak valid atau sudah digunakan."));
+                send(player, "&cID kategori tidak valid atau sudah digunakan.");
                 gui.openCategoriesEditor(player);
                 return;
             }
 
             if (shop.createCategory(id, "&b" + input, Material.CHEST, 0)) {
-                player.sendMessage(plugin.getConfigManager().getPrefix()
-                        + plugin.getConfigManager().getMessage("category-created"));
+                send(player, "&aKategori berhasil dibuat.");
             }
 
             gui.openCategoriesEditor(player);
@@ -607,15 +684,13 @@ public class GUIListener implements Listener {
                 String priceType = type.equals("BUY_PRICE") ? "buy" : "sell";
 
                 if (shop.updatePrice(category, itemSlot, priceType, price)) {
-                    player.sendMessage(plugin.getConfigManager().getPrefix()
-                            + plugin.getConfigManager().color("&aHarga berhasil diperbarui."));
+                    send(player, "&aHarga berhasil diperbarui.");
                 }
 
                 gui.openItemEditor(player, category, itemSlot);
 
             } catch (NumberFormatException exception) {
-                player.sendMessage(plugin.getConfigManager().getPrefix()
-                        + plugin.getConfigManager().color("&cMasukkan angka yang valid."));
+                send(player, "&cMasukkan angka yang valid, contoh: 100");
                 gui.openItemEditor(player, category, itemSlot);
             }
 
@@ -624,27 +699,91 @@ public class GUIListener implements Listener {
 
         if (type.equals("ITEM_NAME")) {
             shop.setItemName(category, itemSlot, input);
-            player.sendMessage(plugin.getConfigManager().getPrefix()
-                    + plugin.getConfigManager().color("&aNama item diperbarui."));
-            gui.openItemEditor(player, category, itemSlot);
-            return;
-        }
-
-        if (type.equals("ITEM_PERMISSION")) {
-            shop.setItemPermission(category, itemSlot, input.equalsIgnoreCase("none") ? "" : input);
-            player.sendMessage(plugin.getConfigManager().getPrefix()
-                    + plugin.getConfigManager().color("&aPermission item diperbarui."));
+            send(player, "&aNama item berhasil diperbarui.");
             gui.openItemEditor(player, category, itemSlot);
             return;
         }
 
         if (type.equals("ITEM_LORE")) {
-            shop.setItemLore(category, itemSlot, Arrays.asList(input.split("\\|")));
-            player.sendMessage(plugin.getConfigManager().getPrefix()
-                    + plugin.getConfigManager().color("&aLore item diperbarui."));
+            List<String> lore = Arrays.asList(input.split("\\|"));
+            shop.setItemLore(category, itemSlot, lore);
+            send(player, "&aLore berhasil diperbarui.");
             gui.openItemEditor(player, category, itemSlot);
+            return;
+        }
+
+        if (type.equals("ITEM_PERMISSION")) {
+            shop.setItemPermission(
+                    category,
+                    itemSlot,
+                    input.equalsIgnoreCase("none") ? "" : input
+            );
+
+            send(player, "&aPermission berhasil diperbarui.");
+            gui.openItemEditor(player, category, itemSlot);
+            return;
+        }
+
+        if (type.equals("ITEM_SLOT")) {
+            try {
+                int newSlot = Integer.parseInt(input);
+
+                if (newSlot < 0 || newSlot >= 45) {
+                    send(player, "&cSlot item harus antara 0 sampai 44.");
+                    gui.openItemEditor(player, category, itemSlot);
+                    return;
+                }
+
+                shop.setItemSlot(category, itemSlot, newSlot);
+                send(player, "&aSlot item berhasil dipindahkan.");
+                gui.openCategoryEditor(player, category);
+
+            } catch (NumberFormatException exception) {
+                send(player, "&cMasukkan nomor slot yang valid.");
+                gui.openItemEditor(player, category, itemSlot);
+            }
+
+            return;
+        }
+
+        if (type.equals("CATEGORY_SETTINGS")) {
+            String[] settings = input.split("\\|", 4);
+
+            if (settings.length < 3) {
+                send(player, "&cFormat: NAMA | MATERIAL | SLOT | PERMISSION");
+                gui.openCategoryEditor(player, category);
+                return;
+            }
+
+            try {
+                String name = settings[0].trim();
+                Material icon = Material.matchMaterial(settings[1].trim());
+                int slot = Integer.parseInt(settings[2].trim());
+                String permission = settings.length >= 4
+                        ? settings[3].trim() : "";
+
+                if (icon == null || slot < 0 || slot >= 54) {
+                    throw new IllegalArgumentException();
+                }
+
+                shop.setCategoryName(category, name);
+                shop.setCategoryIcon(category, icon);
+                shop.setCategorySlot(category, slot);
+                shop.setCategoryPermission(category, permission);
+
+                send(player, "&aPengaturan kategori berhasil diperbarui.");
+                gui.openCategoryEditor(player, category);
+
+            } catch (IllegalArgumentException exception) {
+                send(player, "&cFormat salah. Contoh: Blocks | BRICKS | 20 | none");
+                gui.openCategoryEditor(player, category);
+            }
         }
     }
+
+    // =========================================================
+    // INVENTORY DRAG
+    // =========================================================
 
     @EventHandler
     public void onDrag(InventoryDragEvent event) {
@@ -657,33 +796,65 @@ public class GUIListener implements Listener {
         }
 
         for (int rawSlot : event.getRawSlots()) {
-            if (rawSlot >= 45 || rawSlot < 0) {
+            if (rawSlot < 0 || rawSlot >= 49) {
                 event.setCancelled(true);
                 return;
             }
         }
     }
 
+    // =========================================================
+    // INVENTORY CLOSE
+    // =========================================================
+
     @EventHandler
     public void onClose(InventoryCloseEvent event) {
-        if (!(event.getInventory().getHolder(false) instanceof MenuHolder holder)) return;
-        if (!holder.getType().equals("SELL")) return;
+        if (!(event.getInventory().getHolder(false)
+                instanceof MenuHolder holder)) return;
 
         Player player = (Player) event.getPlayer();
 
-        for (int i = 0; i < 45; i++) {
-            ItemStack item = event.getInventory().getItem(i);
+        if (holder.getType().equals("SELL")) {
+            // Saat konfirmasi dibuka, item tetap disimpan di inventory sementara.
+            if (pendingSell.containsKey(player.getUniqueId())) return;
+
+            returnItems(player, event.getInventory());
+            return;
+        }
+
+        if (holder.getType().equals("SELL_CONFIRM")) {
+            Inventory sell = pendingSell.remove(player.getUniqueId());
+
+            if (sell != null) {
+                returnItems(player, sell);
+            }
+        }
+    }
+
+    private void returnItems(Player player, Inventory inventory) {
+        for (int i = 0; i < 49; i++) {
+            ItemStack item = inventory.getItem(i);
 
             if (item == null || item.getType().isAir()) continue;
 
-            Map<Integer, ItemStack> leftover =
+            Map<Integer, ItemStack> leftovers =
                     player.getInventory().addItem(item.clone());
 
-            for (ItemStack stack : leftover.values()) {
-                player.getWorld().dropItemNaturally(player.getLocation(), stack);
+            for (ItemStack stack : leftovers.values()) {
+                player.getWorld().dropItemNaturally(
+                        player.getLocation(),
+                        stack
+                );
             }
 
-            event.getInventory().setItem(i, null);
+            inventory.setItem(i, null);
         }
+    }
+
+    private void send(Player player, String message) {
+        player.sendMessage(
+                plugin.getConfigManager().getPrefix()
+                        + plugin.getConfigManager().color(message)
+        );
     }
 }
