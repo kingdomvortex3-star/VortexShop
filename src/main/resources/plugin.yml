@@ -2,11 +2,13 @@
 name: VortexShop
 version: 1.0.0
 main: my.kingdomvortex.vortexshop.VortexShop
-api-version: '26.1'
+api-version: '26.3'
 author: KingdomVortex
 description: Advanced GUI Shop and Sell System
+
 depend:
   - Vault
+
 softdepend:
   - PlaceholderAPI
 
@@ -18,7 +20,7 @@ commands:
       - se
 
   sell:
-    description: Open VortexShop Sell GUI
+    description: Open Sell GUI
     usage: /sell
 
   vortexshop:
@@ -30,7 +32,7 @@ commands:
 
 permissions:
   vortexshop.admin:
-    description: Full access to VortexShop editor
+    description: Full access to shop editor
     default: op
 
   vortexshop.use:
