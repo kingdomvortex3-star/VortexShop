@@ -1,0 +1,48 @@
+
+plugins {
+    id 'java'
+}
+
+group = 'my.kingdomvortex'
+version = '1.0.0'
+
+repositories {
+    mavenCentral()
+
+    maven {
+        name = 'papermc'
+        url = 'https://repo.papermc.io/repository/maven-public/'
+    }
+
+    maven {
+        name = 'jitpack'
+        url = 'https://jitpack.io'
+    }
+}
+
+dependencies {
+    compileOnly 'io.papermc.paper:paper-api:26.3.build.+'
+    compileOnly 'com.github.MilkBowl:VaultAPI:1.7.1'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 25
+}
+
+tasks.jar {
+    archiveBaseName = 'VortexShop'
+    archiveVersion = '1.0.0'
+
+    manifest {
+        attributes(
+            'paperweight-mappings-namespace': 'mojang'
+        )
+    }
+}
