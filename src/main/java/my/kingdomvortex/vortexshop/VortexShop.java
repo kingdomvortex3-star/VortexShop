@@ -8,7 +8,6 @@ import my.kingdomvortex.vortexshop.economy.EconomyManager;
 import my.kingdomvortex.vortexshop.gui.GUIListener;
 import my.kingdomvortex.vortexshop.manager.ShopManager;
 import my.kingdomvortex.vortexshop.manager.TransactionManager;
-import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class VortexShop extends JavaPlugin {
@@ -28,9 +27,11 @@ public final class VortexShop extends JavaPlugin {
         saveResourceIfMissing("messages.yml");
         saveResourceIfMissing("shops/default.yml");
 
+        // Initialize managers
         configManager = new ConfigManager(this);
         economyManager = new EconomyManager(this);
 
+        // Setup Vault Economy
         if (!economyManager.setup()) {
             getLogger().severe("Vault Economy tidak ditemukan!");
             getServer().getPluginManager().disablePlugin(this);
@@ -42,25 +43,41 @@ public final class VortexShop extends JavaPlugin {
 
         shopManager.load();
 
+        // Initialize commands
         ShopCommand shopCommand = new ShopCommand(this);
         SellCommand sellCommand = new SellCommand(this);
 
+        // /shop and /shop edit
         getCommand("shop").setExecutor(shopCommand);
         getCommand("shop").setTabCompleter(shopCommand);
 
+        // /se = /shop edit
+        getCommand("se").setExecutor(shopCommand);
+
+        // /sr = /shop reload
+        getCommand("sr").setExecutor(shopCommand);
+
+        // /sell
         getCommand("sell").setExecutor(sellCommand);
 
-        getCommand("vortexshop").setExecutor(shopCommand);
-        getCommand("vortexshop").setTabCompleter(shopCommand);
-
+        // Register GUI listener
         getServer().getPluginManager().registerEvents(
-                new GUIListener(this), this
+                new GUIListener(this),
+                this
         );
 
+        // Startup information
         getLogger().info("==================================");
         getLogger().info(" VortexShop v1.0.0 ENABLED");
         getLogger().info(" Vault Economy Connected");
         getLogger().info(" GUI Shop System Ready");
+        getLogger().info(" Commands Registered:");
+        getLogger().info(" /shop");
+        getLogger().info(" /shop edit");
+        getLogger().info(" /shop reload");
+        getLogger().info(" /se");
+        getLogger().info(" /sr");
+        getLogger().info(" /sell");
         getLogger().info("==================================");
     }
 
@@ -71,6 +88,8 @@ public final class VortexShop extends JavaPlugin {
         }
 
         getLogger().info("VortexShop disabled.");
+
+        instance = null;
     }
 
     private void saveResourceIfMissing(String resource) {
@@ -78,15 +97,28 @@ public final class VortexShop extends JavaPlugin {
             getDataFolder().mkdirs();
         }
 
-        if (!new java.io.File(getDataFolder(), resource).exists()) {
+        java.io.File file = new java.io.File(
+                getDataFolder(),
+                resource
+        );
+
+        if (!file.exists()) {
             saveResource(resource, false);
         }
     }
 
     public void reloadPlugin() {
         reloadConfig();
-        configManager.reload();
-        shopManager.load();
+
+        if (configManager != null) {
+            configManager.reload();
+        }
+
+        if (shopManager != null) {
+            shopManager.load();
+        }
+
+        getLogger().info("VortexShop configuration reloaded.");
     }
 
     public static VortexShop getInstance() {
