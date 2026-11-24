@@ -6,6 +6,9 @@ import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class TransactionManager {
 
     private final VortexShop plugin;
@@ -18,134 +21,286 @@ public class TransactionManager {
         ShopManager shop = plugin.getShopManager();
 
         if (!shop.hasItem(category, slot)) return false;
-        if (amount <= 0 || amount > plugin.getConfig().getInt(
-                "settings.max-buy-amount", 2304)) return false;
+
+        int maximum = plugin.getConfig().getInt(
+                "settings.max-buy-amount", 2304
+        );
+
+        if (amount <= 0 || amount > maximum) {
+            send(player, "&cJumlah pembelian tidak valid!");
+            return false;
+        }
 
         String permission = shop.getItemPermission(category, slot);
 
-        if (!permission.isEmpty() && !player.hasPermission(permission)) {
+        if (!permission.isEmpty()
+                && !player.hasPermission(permission)) {
+            send(player, "&cKamu tidak memiliki permission untuk item ini!");
             return false;
         }
 
         ItemStack template = shop.getItem(category, slot);
-        double price = shop.getBuyPrice(category, slot) * amount;
 
-        if (template == null || price < 0 || !Double.isFinite(price)) {
+        if (template == null || template.getType().isAir()) {
             return false;
         }
 
-        if (!plugin.getEconomyManager().has(player, price)) {
-            player.sendMessage(plugin.getConfigManager().getPrefix() +
-                    plugin.getConfigManager().getMessage("not-enough-money"));
+        double unitPrice = shop.getBuyPrice(category, slot);
+        double total = unitPrice * amount;
+
+        if (!validPrice(unitPrice) || !validPrice(total)) {
+            send(player, "&cHarga item tidak valid!");
             return false;
         }
 
-        int maxStack = template.getMaxStackSize();
+        if (!hasInventorySpace(player, template, amount)) {
+            send(player, "&cInventory kamu tidak cukup!");
+            return false;
+        }
+
+        if (!plugin.getEconomyManager().has(player, total)) {
+            send(player, plugin.getConfigManager()
+                    .getMessage("not-enough-money"));
+            return false;
+        }
+
+        if (!plugin.getEconomyManager().withdraw(player, total)) {
+            send(player, "&cTransaksi gagal. Uang tidak berhasil dipotong!");
+            return false;
+        }
+
         int remaining = amount;
+        int maxStack = template.getMaxStackSize();
 
-        if (remaining > 2304) return false;
+        while (remaining > 0) {
+            int stackAmount = Math.min(remaining, maxStack);
 
-        for (ItemStack content : player.getInventory().getStorageContents()) {
-            if (content == null || content.getType().isAir()) {
-                remaining -= maxStack;
-            } else if (content.isSimilar(template)) {
-                remaining -= Math.max(0, maxStack - content.getAmount());
-            }
-
-            if (remaining <= 0) break;
-        }
-
-        if (remaining > 0) {
-            return false;
-        }
-
-        if (!plugin.getEconomyManager().withdraw(player, price)) {
-            return false;
-        }
-
-        int left = amount;
-
-        while (left > 0) {
-            int stackAmount = Math.min(left, maxStack);
             ItemStack stack = template.clone();
             stack.setAmount(stackAmount);
 
-            player.getInventory().addItem(stack).values().forEach(
-                    player.getWorld()::dropItemNaturally
-            );
+            player.getInventory().addItem(stack);
 
-            left -= stackAmount;
+            remaining -= stackAmount;
         }
 
-        player.sendMessage(plugin.getConfigManager().getPrefix() +
-                plugin.getConfigManager().getMessage("purchase-success")
-                        .replace("{amount}", String.valueOf(amount))
-                        .replace("{item}", template.getType().name())
-                        .replace("{price}",
-                                plugin.getEconomyManager().format(price)));
+        send(player,
+                "&aBerhasil membeli &f" + amount + "x "
+                        + template.getType().name()
+                        + " &adengan harga &e"
+                        + plugin.getEconomyManager().format(total)
+        );
+
+        playSound(player, "sounds.purchase");
 
         return true;
     }
 
+    private boolean hasInventorySpace(
+            Player player,
+            ItemStack template,
+            int amount
+    ) {
+        int available = 0;
+        int maxStack = template.getMaxStackSize();
+
+        for (ItemStack content :
+                player.getInventory().getStorageContents()) {
+
+            if (content == null || content.getType().isAir()) {
+                available += maxStack;
+                continue;
+            }
+
+            if (content.isSimilar(template)) {
+                available += Math.max(
+                        0,
+                        maxStack - content.getAmount()
+                );
+            }
+
+            if (available >= amount) return true;
+        }
+
+        return available >= amount;
+    }
+
     public double calculateSellPrice(ItemStack item) {
-        if (item == null || item.getType().isAir()) return 0;
-
-        String blacklist = item.getType().name();
-
-        if (plugin.getConfig().getStringList(
-                "settings.sell-blacklist").contains(blacklist)) {
+        if (item == null || item.getType().isAir()) {
             return 0;
         }
 
-        for (String category : plugin.getShopManager().getCategories()) {
-            for (String slot : plugin.getShopManager().getItems(category)) {
-                ItemStack shopItem = plugin.getShopManager().getItem(category, slot);
+        List<String> blacklist = plugin.getConfig()
+                .getStringList("settings.sell-blacklist");
 
-                if (shopItem == null || !shopItem.isSimilar(item)) continue;
+        if (blacklist.contains(item.getType().name())) {
+            return 0;
+        }
 
-                double price = plugin.getShopManager().getSellPrice(category, slot);
+        ShopManager shop = plugin.getShopManager();
 
-                if (price < 0 || !Double.isFinite(price)) return 0;
+        for (String category : shop.getCategories()) {
+            for (String slot : shop.getItems(category)) {
 
-                return price * item.getAmount();
+                ItemStack template = shop.getItem(category, slot);
+
+                if (template == null || !template.isSimilar(item)) {
+                    continue;
+                }
+
+                double unitPrice = shop.getSellPrice(category, slot);
+
+                if (!validPrice(unitPrice)) return 0;
+
+                double total = unitPrice * item.getAmount();
+
+                return validPrice(total) ? total : 0;
             }
         }
 
         return 0;
     }
 
-    public double sellAll(Player player) {
+    public boolean sellItem(
+            Player player,
+            String category,
+            String slot,
+            int amount
+    ) {
+        ShopManager shop = plugin.getShopManager();
+
+        if (!shop.hasItem(category, slot)) return false;
+
+        if (amount <= 0) return false;
+
+        ItemStack template = shop.getItem(category, slot);
+
+        if (template == null) return false;
+
+        double unitPrice = shop.getSellPrice(category, slot);
+        double total = unitPrice * amount;
+
+        if (!validPrice(unitPrice) || !validPrice(total)) {
+            return false;
+        }
+
+        ItemStack found = null;
+
+        for (ItemStack content :
+                player.getInventory().getStorageContents()) {
+
+            if (content == null || !content.isSimilar(template)) {
+                continue;
+            }
+
+            if (content.getAmount() >= amount) {
+                found = content;
+                break;
+            }
+        }
+
+        if (found == null) {
+            send(player, "&cItem tidak cukup!");
+            return false;
+        }
+
+        if (!plugin.getEconomyManager().deposit(player, total)) {
+            send(player, "&cPembayaran gagal!");
+            return false;
+        }
+
+        if (found.getAmount() == amount) {
+            player.getInventory().removeItem(found);
+        } else {
+            found.setAmount(found.getAmount() - amount);
+        }
+
+        send(player, "&aBerhasil menjual " + amount
+                + "x " + template.getType().name()
+                + " seharga "
+                + plugin.getEconomyManager().format(total));
+
+        playSound(player, "sounds.sell");
+
+        return true;
+    }
+
+    public boolean sellAll(Player player) {
+        ItemStack[] contents =
+                player.getInventory().getStorageContents();
+
         double total = 0;
 
-        ItemStack[] contents = player.getInventory().getStorageContents();
+        List<Integer> sellSlots = new ArrayList<>();
 
         for (int i = 0; i < contents.length; i++) {
             ItemStack item = contents[i];
 
-            if (item == null || item.getType().isAir()) continue;
+            if (item == null || item.getType().isAir()) {
+                continue;
+            }
 
             double price = calculateSellPrice(item);
 
             if (price <= 0) continue;
 
             total += price;
-            contents[i] = null;
+            sellSlots.add(i);
         }
 
-        if (total > 0 && Double.isFinite(total)) {
-            if (plugin.getEconomyManager().deposit(player, total)) {
-                player.sendMessage(plugin.getConfigManager().getPrefix() +
-                        plugin.getConfigManager().getMessage("sell-success")
-                                .replace("{price}",
-                                        plugin.getEconomyManager().format(total)));
-            }
+        if (sellSlots.isEmpty() || !validPrice(total)) {
+            send(player, "&cTidak ada item yang bisa dijual!");
+            return false;
+        }
+
+        // Bayar dahulu. Jangan hapus item jika pembayaran gagal.
+        if (!plugin.getEconomyManager().deposit(player, total)) {
+            send(player, "&cPembayaran gagal. Item tetap aman!");
+            return false;
+        }
+
+        // Hapus hanya slot yang sudah dihitung.
+        for (int slot : sellSlots) {
+            contents[slot] = null;
         }
 
         player.getInventory().setStorageContents(contents);
-        return total;
+
+        send(player, "&aBerhasil menjual semua item seharga &e"
+                + plugin.getEconomyManager().format(total));
+
+        playSound(player, "sounds.sell");
+
+        return true;
     }
 
-    public VortexShop getPlugin() {
-        return plugin;
+    private boolean validPrice(double price) {
+        return Double.isFinite(price) && price >= 0;
+    }
+
+    private void send(Player player, String message) {
+        player.sendMessage(
+                plugin.getConfigManager().getPrefix()
+                        + plugin.getConfigManager().color(message)
+        );
+    }
+
+    private void playSound(Player player, String path) {
+        if (!plugin.getConfig().getBoolean("sounds.enabled", true)) {
+            return;
+        }
+
+        String sound = plugin.getConfig().getString(path);
+
+        if (sound == null) return;
+
+        try {
+            player.playSound(
+                    player.getLocation(),
+                    org.bukkit.Sound.valueOf(sound),
+                    1f,
+                    1f
+            );
+        } catch (IllegalArgumentException ignored) {
+        }
     }
 }
