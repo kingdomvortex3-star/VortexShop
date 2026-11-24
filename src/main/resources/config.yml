@@ -1,0 +1,62 @@
+
+settings:
+  prefix: "&8[&bVortexShop&8] "
+  currency-symbol: "$"
+  decimal-format: "#,##0.00"
+  max-buy-amount: 2304
+  max-sell-amount: 2304
+  confirm-purchase: true
+  confirm-sell: true
+  close-after-purchase: false
+  close-after-sell: false
+  sell-blacklist:
+    - AIR
+    - BEDROCK
+    - BARRIER
+    - COMMAND_BLOCK
+    - STRUCTURE_BLOCK
+
+sounds:
+  enabled: true
+  click: UI_BUTTON_CLICK
+  purchase: ENTITY_EXPERIENCE_ORB_PICKUP
+  sell: ENTITY_PLAYER_LEVELUP
+  error: ENTITY_VILLAGER_NO
+
+gui:
+  main:
+    title: "&8✦ &bNOVATERRA SHOP"
+    rows: 6
+  category:
+    title: "&8✦ &b{category}"
+    rows: 6
+  editor:
+    title: "&8✦ &cSHOP EDITOR"
+    rows: 3
+  sell:
+    title: "&8✦ &cSELL ITEMS"
+    rows: 6
+
+  filler:
+    enabled: true
+    material: BLACK_STAINED_GLASS_PANE
+    name: " "
+
+messages:
+  no-permission: "&cKamu tidak memiliki permission!"
+  player-only: "&cCommand ini hanya untuk player!"
+  reloaded: "&aKonfigurasi VortexShop berhasil dimuat ulang!"
+  economy-error: "&cVault Economy tidak ditemukan!"
+  not-enough-money: "&cUang kamu tidak cukup!"
+  purchase-success: "&aBerhasil membeli &f{amount}x {item} &adengan harga &e{price}"
+  sell-success: "&aBerhasil menjual item dengan total &e{price}"
+  invalid-amount: "&cJumlah tidak valid!"
+  invalid-price: "&cHarga tidak valid!"
+  category-created: "&aKategori berhasil dibuat!"
+  category-deleted: "&cKategori berhasil dihapus!"
+  item-added: "&aItem berhasil ditambahkan!"
+  item-updated: "&aItem berhasil diperbarui!"
+  cancelled: "&cTransaksi dibatalkan."
+  no-items: "&cTidak ada item yang bisa dijual."
+  blacklisted: "&cItem tersebut tidak dapat dijual."
+  prompt-cancel: "&7Ketik &c cancel &7untuk membatalkan."
