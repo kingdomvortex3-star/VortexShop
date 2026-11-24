@@ -19,17 +19,23 @@ public class SellCommand implements CommandExecutor {
     }
 
     @Override
-    public boolean onCommand(CommandSender sender, Command command,
-                             String label, String[] args) {
-
+    public boolean onCommand(
+            CommandSender sender,
+            Command command,
+            String label,
+            String[] args
+    ) {
         if (!(sender instanceof Player player)) {
-            sender.sendMessage("This command is for players only.");
+            sender.sendMessage("This command can only be used by players.");
             return true;
         }
 
         if (!player.hasPermission("vortexshop.sell")) {
-            player.sendMessage(plugin.getConfigManager().getPrefix() +
-                    "&cKamu tidak memiliki permission!");
+            player.sendMessage(
+                    plugin.getConfigManager().getPrefix()
+                            + plugin.getConfigManager()
+                            .getMessage("no-permission")
+            );
             return true;
         }
 
