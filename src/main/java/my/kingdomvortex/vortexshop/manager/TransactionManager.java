@@ -4,7 +4,6 @@ package my.kingdomvortex.vortexshop.manager;
 import my.kingdomvortex.vortexshop.VortexShop;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -80,20 +79,16 @@ public class TransactionManager {
 
         while (remaining > 0) {
             int stackAmount = Math.min(remaining, maxStack);
-
             ItemStack stack = template.clone();
             stack.setAmount(stackAmount);
-
             player.getInventory().addItem(stack);
             remaining -= stackAmount;
         }
 
-        send(player,
-                "&aBerhasil membeli &f" + amount + "x "
-                        + template.getType().name()
-                        + " &adengan harga &e"
-                        + plugin.getEconomyManager().format(total)
-        );
+        send(player, "&aBerhasil membeli &f" + amount + "x "
+                + template.getType().name()
+                + " &adengan harga &e"
+                + plugin.getEconomyManager().format(total));
 
         playSound(player, "sounds.purchase");
         return true;
@@ -121,34 +116,40 @@ public class TransactionManager {
     }
 
     // =========================================================
-    // SELL PRICE
+    // EXACT SHOP MATCH
     // =========================================================
 
     /**
-     * Menghitung harga jual berdasarkan item yang terdaftar di Shop.
-     *
-     * Item yang tidak terdaftar di Shop tidak bisa dijual.
-     * Harga jual dihitung per item x jumlah stack.
+     * Item harus sama persis dengan template Shop.
+     * Material dan seluruh metadata harus cocok.
+     * Jumlah stack tidak memengaruhi pencocokan.
+     */
+    private boolean matchesShopItem(ItemStack template, ItemStack item) {
+        if (template == null || item == null) return false;
+        if (template.getType().isAir() || item.getType().isAir()) return false;
+
+        return template.isSimilar(item);
+    }
+
+    /**
+     * Mengembalikan harga jual total untuk stack.
+     * Item yang tidak ditemukan di Shop atau harga jual <= 0
+     * tidak dapat dijual.
      */
     public double calculateSellPrice(ItemStack item) {
         if (item == null || item.getType().isAir()) return 0;
-
         if (isBlacklisted(item)) return 0;
 
         ShopManager shop = plugin.getShopManager();
 
         for (String category : shop.getCategories()) {
             for (String slot : shop.getItems(category)) {
-
                 ItemStack template = shop.getItem(category, slot);
 
-                if (template == null || !matchesShopItem(template, item)) {
-                    continue;
-                }
+                if (!matchesShopItem(template, item)) continue;
 
                 double unitPrice = shop.getSellPrice(category, slot);
 
-                // Harga jual 0 berarti item tidak dapat dijual.
                 if (!validSellPrice(unitPrice)) return 0;
 
                 double total = unitPrice * item.getAmount();
@@ -157,56 +158,7 @@ public class TransactionManager {
             }
         }
 
-        // Tidak ditemukan di Shop = tidak bisa dijual.
         return 0;
-    }
-
-    /**
-     * Pencocokan item:
-     * - Material harus sama.
-     * - Jika item Shop punya nama/lore custom, nama/lore harus cocok.
-     * - Jika tidak punya nama/lore custom, material saja cukup.
-     */
-    private boolean matchesShopItem(ItemStack template, ItemStack item) {
-        if (template == null || item == null) return false;
-
-        if (template.getType() != item.getType()) {
-            return false;
-        }
-
-        ItemMeta templateMeta = template.getItemMeta();
-
-        if (templateMeta == null) return true;
-
-        boolean hasCustomName = templateMeta.hasDisplayName();
-        boolean hasCustomLore = templateMeta.hasLore();
-
-        if (!hasCustomName && !hasCustomLore) {
-            return true;
-        }
-
-        ItemMeta itemMeta = item.getItemMeta();
-
-        if (itemMeta == null) return false;
-
-        if (hasCustomName) {
-            if (!itemMeta.hasDisplayName()) return false;
-
-            if (!templateMeta.getDisplayName()
-                    .equals(itemMeta.getDisplayName())) {
-                return false;
-            }
-        }
-
-        if (hasCustomLore) {
-            if (!itemMeta.hasLore()) return false;
-
-            if (!templateMeta.getLore().equals(itemMeta.getLore())) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private boolean isBlacklisted(ItemStack item) {
@@ -217,7 +169,7 @@ public class TransactionManager {
     }
 
     // =========================================================
-    // SELL ONE ITEM TYPE
+    // SELL ITEM
     // =========================================================
 
     public boolean sellItem(
@@ -228,7 +180,10 @@ public class TransactionManager {
     ) {
         ShopManager shop = plugin.getShopManager();
 
-        if (!shop.hasItem(category, slot)) return false;
+        if (!shop.hasItem(category, slot)) {
+            send(player, "&cItem tidak terdaftar di Shop!");
+            return false;
+        }
 
         if (amount <= 0) return false;
 
@@ -268,9 +223,7 @@ public class TransactionManager {
         for (int i = 0; i < contents.length; i++) {
             ItemStack content = contents[i];
 
-            if (content == null || !matchesShopItem(template, content)) {
-                continue;
-            }
+            if (!matchesShopItem(template, content)) continue;
 
             selectedSlots.add(i);
             remaining -= content.getAmount();
@@ -279,7 +232,7 @@ public class TransactionManager {
         }
 
         if (remaining > 0) {
-            send(player, "&cItem tidak cukup!");
+            send(player, "&cItem tidak cukup atau item tidak cocok dengan Shop!");
             return false;
         }
 
@@ -311,12 +264,10 @@ public class TransactionManager {
 
         player.getInventory().setStorageContents(contents);
 
-        send(player,
-                "&aBerhasil menjual &f" + amount + "x "
-                        + template.getType().name()
-                        + " &aseharga &e"
-                        + plugin.getEconomyManager().format(total)
-        );
+        send(player, "&aBerhasil menjual &f" + amount + "x "
+                + template.getType().name()
+                + " &aseharga &e"
+                + plugin.getEconomyManager().format(total));
 
         playSound(player, "sounds.sell");
         return true;
@@ -357,7 +308,6 @@ public class TransactionManager {
             return false;
         }
 
-        // Deposit dahulu. Item tidak dihapus jika pembayaran gagal.
         if (!plugin.getEconomyManager().deposit(player, total)) {
             send(player, "&cPembayaran gagal. Item tetap aman!");
             return false;
@@ -369,10 +319,8 @@ public class TransactionManager {
 
         player.getInventory().setStorageContents(contents);
 
-        send(player,
-                "&aBerhasil menjual semua item Shop seharga &e"
-                        + plugin.getEconomyManager().format(total)
-        );
+        send(player, "&aBerhasil menjual semua item Shop seharga &e"
+                + plugin.getEconomyManager().format(total));
 
         playSound(player, "sounds.sell");
         return true;
@@ -402,12 +350,9 @@ public class TransactionManager {
     }
 
     private void playSound(Player player, String path) {
-        if (!plugin.getConfig().getBoolean("sounds.enabled", true)) {
-            return;
-        }
+        if (!plugin.getConfig().getBoolean("sounds.enabled", true)) return;
 
         String sound = plugin.getConfig().getString(path);
-
         if (sound == null) return;
 
         try {
