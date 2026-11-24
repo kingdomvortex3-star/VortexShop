@@ -6,725 +6,598 @@ import my.kingdomvortex.vortexshop.manager.ShopManager;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.Listener;
-import org.bukkit.event.inventory.*;
-import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.ArrayList;
+import java.util.List;
 
-public class GUIListener implements Listener {
+public class GUIManager {
 
     private final VortexShop plugin;
-    private final GUIManager gui;
 
-    private final Map<UUID, String> chatActions =
-            new ConcurrentHashMap<>();
-
-    private final Map<UUID, Integer> pendingPurchases =
-            new ConcurrentHashMap<>();
-
-    public GUIListener(VortexShop plugin) {
+    public GUIManager(VortexShop plugin) {
         this.plugin = plugin;
-        this.gui = new GUIManager(plugin);
     }
 
-    @EventHandler
-    public void onClick(InventoryClickEvent event) {
-        if (!(event.getWhoClicked() instanceof Player player)) return;
-
-        Inventory top = event.getView().getTopInventory();
-
-        if (!(top.getHolder(false) instanceof MenuHolder holder)) return;
-
-        String type = holder.getType();
-        int rawSlot = event.getRawSlot();
-
-        if (type.equals("SELL")) {
-            handleSellClick(event, player, rawSlot);
-            return;
-        }
-
-        event.setCancelled(true);
-
-        if (rawSlot < 0 || rawSlot >= top.getSize()) return;
-
-        switch (type) {
-            case "MAIN" -> handleMain(player, rawSlot);
-            case "CATEGORY" -> handleCategory(player, holder, rawSlot);
-            case "EDITOR" -> handleEditor(player, rawSlot);
-            case "CATEGORIES_EDITOR" ->
-                    handleCategories(player, rawSlot, event);
-            case "CATEGORY_EDITOR" ->
-                    handleCategoryEditor(player, holder, rawSlot, event);
-            case "ITEM_EDITOR" ->
-                    handleItemEditor(player, holder, rawSlot);
-            case "QUANTITY" ->
-                    handleQuantity(player, holder, rawSlot);
-            case "BUY_CONFIRM" ->
-                    handleBuyConfirm(player, holder, rawSlot);
-        }
-    }
-
-    private void handleMain(Player player, int slot) {
-        ShopManager shop = plugin.getShopManager();
-
-        for (String category : shop.getCategories()) {
-            if (shop.getCategorySlot(category) == slot) {
-                gui.openCategory(player, category);
-                return;
-            }
-        }
-    }
-
-    private void handleCategory(Player player, MenuHolder holder, int slot) {
-        if (slot == 49) {
-            gui.openMain(player);
-            return;
-        }
-
-        String category = holder.getCategory();
-        String itemSlot = String.valueOf(slot);
-
-        if (!plugin.getShopManager().hasItem(category, itemSlot)) return;
-
-        gui.openQuantity(player, category, itemSlot);
-    }
-
-    private void handleEditor(Player player, int slot) {
-        switch (slot) {
-            case 10 -> gui.openCategoriesEditor(player);
-
-            case 12 -> {
-                plugin.reloadPlugin();
-                player.sendMessage("&aVortexShop reloaded!");
-                gui.openEditor(player);
-            }
-
-            case 14 -> gui.openMain(player);
-            case 16 -> player.closeInventory();
-        }
-    }
-
-    private void handleCategories(Player player, int slot,
-                                  InventoryClickEvent event) {
-        ShopManager shop = plugin.getShopManager();
-
-        if (slot == 49) {
-            requestChat(player, "CREATE_CATEGORY");
-            return;
-        }
-
-        if (slot == 53) {
-            gui.openEditor(player);
-            return;
-        }
-
-        if (slot < 0 || slot >= 45) return;
-
-        List<String> categories = new ArrayList<>(shop.getCategories());
-
-        if (slot >= categories.size()) return;
-
-        String category = categories.get(slot);
-
-        if (event.isRightClick()) {
-            shop.deleteCategory(category);
-            player.sendMessage(color("&cCategory deleted."));
-            gui.openCategoriesEditor(player);
-            return;
-        }
-
-        gui.openCategoryEditor(player, category);
-    }
-
-    private void handleCategoryEditor(
-            Player player,
-            MenuHolder holder,
-            int slot,
-            InventoryClickEvent event
+    public Inventory create(
+            String type,
+            String category,
+            String slot,
+            String title,
+            int size
     ) {
-        ShopManager shop = plugin.getShopManager();
-        String category = holder.getCategory();
+        MenuHolder holder = new MenuHolder(type, category, slot);
 
-        if (!shop.hasCategory(category)) {
-            player.closeInventory();
-            return;
-        }
-
-        if (slot == 49) {
-            gui.openCategoriesEditor(player);
-            return;
-        }
-
-        if (slot == 51) {
-            requestChat(player, "CATEGORY_SETTINGS:" + category);
-            return;
-        }
-
-        if (slot == 53) {
-            addItemFromHand(player, category, slot);
-            return;
-        }
-
-        if (slot < 0 || slot >= 45) return;
-
-        String itemSlot = String.valueOf(slot);
-
-        if (shop.hasItem(category, itemSlot)) {
-            if (event.isRightClick()) {
-                shop.removeItem(category, itemSlot);
-                player.sendMessage(color("&cItem removed."));
-                gui.openCategoryEditor(player, category);
-            } else {
-                gui.openItemEditor(player, category, itemSlot);
-            }
-            return;
-        }
-
-        addItemFromHand(player, category, slot);
-    }
-
-    private void addItemFromHand(Player player, String category, int slot) {
-        ItemStack hand = player.getInventory().getItemInMainHand();
-
-        if (hand.getType().isAir()) {
-            player.sendMessage(color("&cHold an item first!"));
-            return;
-        }
-
-        if (plugin.getShopManager().addItem(
-                category, slot, hand.clone(), 0, 0)) {
-
-            player.sendMessage(color("&aItem added!"));
-            gui.openItemEditor(
-                    player, category, String.valueOf(slot)
-            );
-        }
-    }
-
-    private void handleItemEditor(
-            Player player,
-            MenuHolder holder,
-            int slot
-    ) {
-        String category = holder.getCategory();
-        String itemSlot = holder.getSlot();
-
-        ShopManager shop = plugin.getShopManager();
-
-        if (!shop.hasItem(category, itemSlot)) {
-            player.closeInventory();
-            return;
-        }
-
-        switch (slot) {
-            case 10 -> requestChat(player,
-                    "BUY:" + category + ":" + itemSlot);
-
-            case 12 -> requestChat(player,
-                    "SELL:" + category + ":" + itemSlot);
-
-            case 14 -> requestChat(player,
-                    "NAME:" + category + ":" + itemSlot);
-
-            case 16 -> requestChat(player,
-                    "LORE:" + category + ":" + itemSlot);
-
-            case 20 -> requestChat(player,
-                    "PERMISSION:" + category + ":" + itemSlot);
-
-            case 22 -> requestChat(player,
-                    "MOVE:" + category + ":" + itemSlot);
-
-            case 26 -> {
-                shop.removeItem(category, itemSlot);
-                player.sendMessage(color("&cItem deleted."));
-                gui.openCategoryEditor(player, category);
-            }
-
-            case 18 -> gui.openCategoryEditor(player, category);
-        }
-    }
-
-    private void handleQuantity(
-            Player player,
-            MenuHolder holder,
-            int slot
-    ) {
-        int amount = switch (slot) {
-            case 10 -> 1;
-            case 12 -> 16;
-            case 14 -> 32;
-            case 16 -> 64;
-            default -> 0;
-        };
-
-        if (slot == 22) {
-            gui.openCategory(player, holder.getCategory());
-            return;
-        }
-
-        if (amount <= 0) return;
-
-        pendingPurchases.put(player.getUniqueId(), amount);
-
-        gui.openConfirm(
-                player,
-                holder.getCategory(),
-                holder.getSlot(),
-                amount
-        );
-    }
-
-    private void handleBuyConfirm(
-            Player player,
-            MenuHolder holder,
-            int slot
-    ) {
-        if (slot == 15) {
-            pendingPurchases.remove(player.getUniqueId());
-            gui.openCategory(player, holder.getCategory());
-            return;
-        }
-
-        if (slot != 11) return;
-
-        Integer amount = pendingPurchases.remove(player.getUniqueId());
-
-        if (amount == null) {
-            player.closeInventory();
-            return;
-        }
-
-        plugin.getTransactionManager().buy(
-                player,
-                holder.getCategory(),
-                holder.getSlot(),
-                amount
+        Inventory inventory = Bukkit.createInventory(
+                holder,
+                size,
+                plugin.getConfigManager().color(title)
         );
 
-        player.closeInventory();
-    }
+        holder.setInventory(inventory);
 
-    // SELL GUI
-
-    private void handleSellClick(
-            InventoryClickEvent event,
-            Player player,
-            int slot
-    ) {
-        Inventory top = event.getView().getTopInventory();
-
-        if (slot == 49) {
-            event.setCancelled(true);
-            sellAllFromGUI(player, top);
-            return;
-        }
-
-        if (slot == 53) {
-            event.setCancelled(true);
-            player.closeInventory();
-            return;
-        }
-
-        if (slot < 0) return;
-
-        if (slot < top.getSize()) {
-            event.setCancelled(slot >= 49);
-            return;
-        }
-
-        if (event.isShiftClick()) {
-            event.setCancelled(true);
-
-            ItemStack source = event.getCurrentItem();
-
-            if (source == null || source.getType().isAir()) return;
-
-            ItemStack moving = source.clone();
-
-            int moved = insertItem(top, moving);
-
-            if (moved > 0) {
-                int remaining = source.getAmount() - moved;
-
-                if (remaining <= 0) {
-                    event.setCurrentItem(null);
-                } else {
-                    source.setAmount(remaining);
-                    event.setCurrentItem(source);
-                }
-            }
-        }
-    }
-
-    private int insertItem(Inventory inventory, ItemStack item) {
-        int remaining = item.getAmount();
-        int maxStack = item.getMaxStackSize();
-
-        for (int i = 0; i < 49 && remaining > 0; i++) {
-            ItemStack current = inventory.getItem(i);
-
-            if (current == null || !current.isSimilar(item)) continue;
-
-            int space = maxStack - current.getAmount();
-            int add = Math.min(space, remaining);
-
-            if (add > 0) {
-                current.setAmount(current.getAmount() + add);
-                remaining -= add;
-            }
-        }
-
-        for (int i = 0; i < 49 && remaining > 0; i++) {
-            ItemStack current = inventory.getItem(i);
-
-            if (current != null && !current.getType().isAir()) continue;
-
-            int add = Math.min(maxStack, remaining);
-
-            ItemStack stack = item.clone();
-            stack.setAmount(add);
-
-            inventory.setItem(i, stack);
-            remaining -= add;
-        }
-
-        return item.getAmount() - remaining;
-    }
-
-    private void sellAllFromGUI(Player player, Inventory inventory) {
-        double total = 0;
-        boolean[] sellable = new boolean[49];
-
-        for (int i = 0; i < 49; i++) {
-            ItemStack item = inventory.getItem(i);
-
-            if (item == null || item.getType().isAir()) continue;
-
-            double price = plugin.getTransactionManager()
-                    .calculateSellPrice(item);
-
-            if (price <= 0) continue;
-
-            if (!Double.isFinite(price)) {
-                player.sendMessage(color("&cInvalid transaction!"));
-                return;
-            }
-
-            total += price;
-            sellable[i] = true;
-        }
-
-        if (total <= 0 || !Double.isFinite(total)) {
-            player.sendMessage(color("&cNo sellable items found!"));
-            return;
-        }
-
-        // Deposit before removing any items.
-        if (!plugin.getEconomyManager().deposit(player, total)) {
-            player.sendMessage(color("&cPayment failed! Items are safe."));
-            return;
-        }
-
-        for (int i = 0; i < 49; i++) {
-            if (sellable[i]) {
-                inventory.setItem(i, null);
-            }
-        }
-
-        player.sendMessage(color(
-                "&aSuccessfully sold items for &e"
-                        + plugin.getEconomyManager().format(total)
-        ));
-
-        playSound(player, "sounds.sell");
-    }
-
-    // INVENTORY DRAG
-
-    @EventHandler
-    public void onDrag(InventoryDragEvent event) {
-        if (!(event.getView().getTopInventory()
-                .getHolder(false) instanceof MenuHolder holder)) return;
-
-        if (!holder.getType().equals("SELL")) {
-            event.setCancelled(true);
-            return;
-        }
-
-        for (int rawSlot : event.getRawSlots()) {
-            if (rawSlot < 0 || rawSlot >= 49) {
-                event.setCancelled(true);
-                return;
-            }
-        }
-    }
-
-    // RETURN UNSOLD ITEMS
-
-    @EventHandler
-    public void onClose(InventoryCloseEvent event) {
-        if (!(event.getInventory().getHolder(false)
-                instanceof MenuHolder holder)) return;
-
-        Player player = (Player) event.getPlayer();
-
-        if (!holder.getType().equals("SELL")) return;
-
-        Inventory inventory = event.getInventory();
-
-        for (int i = 0; i < 49; i++) {
-            ItemStack item = inventory.getItem(i);
-
-            if (item == null || item.getType().isAir()) continue;
-
-            Map<Integer, ItemStack> leftovers =
-                    player.getInventory().addItem(item.clone());
-
-            leftovers.values().forEach(stack ->
-                    player.getWorld().dropItemNaturally(
-                            player.getLocation(), stack
+        if (plugin.getConfig().getBoolean("gui.filler.enabled", true)) {
+            Material material = Material.matchMaterial(
+                    plugin.getConfig().getString(
+                            "gui.filler.material",
+                            "BLACK_STAINED_GLASS_PANE"
                     )
             );
 
-            inventory.setItem(i, null);
-        }
-    }
-
-    // CHAT EDITOR
-
-    @EventHandler
-    public void onChat(AsyncPlayerChatEvent event) {
-        Player player = event.getPlayer();
-
-        String action = chatActions.remove(player.getUniqueId());
-
-        if (action == null) return;
-
-        event.setCancelled(true);
-
-        String input = event.getMessage().trim();
-
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            if (input.equalsIgnoreCase("cancel")) {
-                player.sendMessage(color("&cCancelled."));
-                return;
+            if (material == null) {
+                material = Material.BLACK_STAINED_GLASS_PANE;
             }
 
-            handleChatInput(player, action, input);
-        });
+            ItemStack filler = button(
+                    material,
+                    plugin.getConfig().getString(
+                            "gui.filler.name", " "
+                    ),
+                    List.of()
+            );
+
+            for (int i = 0; i < size; i++) {
+                inventory.setItem(i, filler.clone());
+            }
+        }
+
+        return inventory;
     }
 
-    private void requestChat(Player player, String action) {
-        chatActions.put(player.getUniqueId(), action);
-        player.closeInventory();
-
-        player.sendMessage(color("&8&m------------------------"));
-        player.sendMessage(color("&bVortexShop Editor"));
-        player.sendMessage(color("&7Enter the new value in chat."));
-        player.sendMessage(color("&7Type &ccancel &7to cancel."));
-        player.sendMessage(color("&8&m------------------------"));
-    }
-
-    private void handleChatInput(
-            Player player,
-            String action,
-            String input
+    public ItemStack button(
+            Material material,
+            String name,
+            List<String> lore
     ) {
+        ItemStack item = new ItemStack(material);
+        ItemMeta meta = item.getItemMeta();
+
+        if (meta != null) {
+            meta.setDisplayName(
+                    plugin.getConfigManager().color(name)
+            );
+
+            List<String> colored = new ArrayList<>();
+
+            for (String line : lore) {
+                colored.add(
+                        plugin.getConfigManager().color(line)
+                );
+            }
+
+            meta.setLore(colored);
+            item.setItemMeta(meta);
+        }
+
+        return item;
+    }
+
+    public void openMain(Player player) {
         ShopManager shop = plugin.getShopManager();
 
-        if (action.equals("CREATE_CATEGORY")) {
-            String id = input.toLowerCase(Locale.ROOT)
-                    .replaceAll("[^a-z0-9_-]", "");
+        Inventory inventory = create(
+                "MAIN", null, null,
+                "&8✦ &bNOVATERRA SHOP", 54
+        );
 
-            if (id.isBlank() || shop.hasCategory(id)) {
-                player.sendMessage(color("&cInvalid category ID."));
-                gui.openCategoriesEditor(player);
-                return;
+        for (String category : shop.getCategories()) {
+            String permission =
+                    shop.getCategoryPermission(category);
+
+            if (!permission.isEmpty()
+                    && !player.hasPermission(permission)) {
+                continue;
             }
 
-            shop.createCategory(
-                    id, "&b" + input, Material.CHEST, 0
-            );
+            int slot = shop.getCategorySlot(category);
 
-            player.sendMessage(color("&aCategory created!"));
-            gui.openCategoriesEditor(player);
+            if (slot < 0 || slot >= 54) continue;
+
+            inventory.setItem(
+                    slot,
+                    button(
+                            shop.getCategoryIcon(category),
+                            shop.getCategoryName(category),
+                            List.of(
+                                    "&7Browse category",
+                                    "",
+                                    "&eClick to open"
+                            )
+                    )
+            );
+        }
+
+        player.openInventory(inventory);
+    }
+
+    public void openCategory(Player player, String category) {
+        ShopManager shop = plugin.getShopManager();
+
+        if (!shop.hasCategory(category)) return;
+
+        String permission =
+                shop.getCategoryPermission(category);
+
+        if (!permission.isEmpty()
+                && !player.hasPermission(permission)) {
             return;
         }
 
-        if (action.startsWith("CATEGORY_SETTINGS:")) {
-            updateCategory(
-                    player,
-                    action.substring("CATEGORY_SETTINGS:".length()),
-                    input
-            );
-            return;
-        }
+        Inventory inventory = create(
+                "CATEGORY",
+                category,
+                null,
+                "&8✦ " + shop.getCategoryName(category),
+                54
+        );
 
-        String[] parts = action.split(":", 3);
+        for (String itemSlot : shop.getItems(category)) {
+            int index;
 
-        if (parts.length != 3) return;
-
-        String type = parts[0];
-        String category = parts[1];
-        String slot = parts[2];
-
-        if (!shop.hasItem(category, slot)) return;
-
-        switch (type) {
-            case "BUY", "SELL" -> {
-                try {
-                    double price = Double.parseDouble(input);
-
-                    if (!Double.isFinite(price) || price < 0) {
-                        throw new NumberFormatException();
-                    }
-
-                    shop.updatePrice(
-                            category,
-                            slot,
-                            type.toLowerCase(Locale.ROOT),
-                            price
-                    );
-
-                    player.sendMessage(color("&aPrice updated!"));
-
-                } catch (NumberFormatException exception) {
-                    player.sendMessage(color("&cInvalid price!"));
-                }
-
-                gui.openItemEditor(player, category, slot);
+            try {
+                index = Integer.parseInt(itemSlot);
+            } catch (NumberFormatException exception) {
+                continue;
             }
 
-            case "NAME" -> {
-                shop.setItemName(category, slot, input);
-                player.sendMessage(color("&aName updated!"));
-                gui.openItemEditor(player, category, slot);
+            if (index < 0 || index >= 45) continue;
+
+            ItemStack item = shop.getItem(category, itemSlot);
+
+            if (item == null) continue;
+
+            String permissionItem =
+                    shop.getItemPermission(category, itemSlot);
+
+            if (!permissionItem.isEmpty()
+                    && !player.hasPermission(permissionItem)) {
+                continue;
             }
 
-            case "LORE" -> {
-                List<String> lore = Arrays.stream(input.split("\\|"))
-                        .map(String::trim)
-                        .toList();
+            ItemMeta meta = item.getItemMeta();
 
-                shop.setItemLore(category, slot, lore);
-                player.sendMessage(color("&aLore updated!"));
-                gui.openItemEditor(player, category, slot);
-            }
+            if (meta != null) {
+                List<String> lore = meta.hasLore()
+                        ? new ArrayList<>(meta.getLore())
+                        : new ArrayList<>();
 
-            case "PERMISSION" -> {
-                shop.setItemPermission(
-                        category,
-                        slot,
-                        input.equalsIgnoreCase("none") ? "" : input
+                lore.add("");
+                lore.add("&aBuy: &f" +
+                        plugin.getEconomyManager().format(
+                                shop.getBuyPrice(category, itemSlot)
+                        ));
+                lore.add("&cSell: &f" +
+                        plugin.getEconomyManager().format(
+                                shop.getSellPrice(category, itemSlot)
+                        ));
+                lore.add("");
+                lore.add("&eClick to purchase");
+
+                meta.setLore(
+                        lore.stream()
+                                .map(plugin.getConfigManager()::color)
+                                .toList()
                 );
 
-                player.sendMessage(color("&aPermission updated!"));
-                gui.openItemEditor(player, category, slot);
+                item.setItemMeta(meta);
             }
 
-            case "MOVE" -> {
-                try {
-                    int newSlot = Integer.parseInt(input);
-
-                    if (newSlot < 0 || newSlot >= 45) {
-                        throw new NumberFormatException();
-                    }
-
-                    shop.setItemSlot(category, slot, newSlot);
-
-                    player.sendMessage(color("&aItem moved!"));
-
-                } catch (NumberFormatException exception) {
-                    player.sendMessage(color("&cInvalid slot!"));
-                }
-
-                gui.openCategoryEditor(player, category);
-            }
+            inventory.setItem(index, item);
         }
+
+        inventory.setItem(
+                49,
+                button(
+                        Material.ARROW,
+                        "&cBack",
+                        List.of("&7Return to shop")
+                )
+        );
+
+        player.openInventory(inventory);
     }
 
-    private void updateCategory(
-            Player player,
-            String category,
-            String input
-    ) {
-        String[] parts = input.split("\\|", 4);
+    public void openEditor(Player player) {
+        Inventory inventory = create(
+                "EDITOR", null, null,
+                "&8✦ &cVortexShop Editor", 27
+        );
 
-        if (parts.length < 3) {
-            player.sendMessage(color(
-                    "&cFormat: NAME | MATERIAL | SLOT | PERMISSION"
-            ));
-            gui.openCategoryEditor(player, category);
-            return;
-        }
+        inventory.setItem(10, button(
+                Material.CHEST,
+                "&bManage Categories",
+                List.of("&7Create, edit and delete categories")
+        ));
 
-        try {
-            Material icon = Material.matchMaterial(parts[1].trim());
-            int slot = Integer.parseInt(parts[2].trim());
+        inventory.setItem(12, button(
+                Material.ANVIL,
+                "&eReload Shop",
+                List.of("&7Reload shop configuration")
+        ));
 
-            if (icon == null || slot < 0 || slot >= 54) {
-                throw new IllegalArgumentException();
-            }
+        inventory.setItem(14, button(
+                Material.BOOK,
+                "&aShop Preview",
+                List.of("&7Preview player shop")
+        ));
 
-            shopUpdate(
-                    category,
-                    parts[0].trim(),
-                    icon,
+        inventory.setItem(16, button(
+                Material.BARRIER,
+                "&cClose",
+                List.of("&7Close editor")
+        ));
+
+        player.openInventory(inventory);
+    }
+
+    public void openCategoriesEditor(Player player) {
+        ShopManager shop = plugin.getShopManager();
+
+        Inventory inventory = create(
+                "CATEGORIES_EDITOR",
+                null,
+                null,
+                "&8✦ &bCategory Management",
+                54
+        );
+
+        int slot = 0;
+
+        for (String category : shop.getCategories()) {
+            if (slot >= 45) break;
+
+            inventory.setItem(
                     slot,
-                    parts.length >= 4 ? parts[3].trim() : ""
+                    button(
+                            shop.getCategoryIcon(category),
+                            shop.getCategoryName(category),
+                            List.of(
+                                    "&7ID: &f" + category,
+                                    "",
+                                    "&eLeft click: Edit",
+                                    "&cRight click: Delete"
+                            )
+                    )
             );
 
-            player.sendMessage(color("&aCategory updated!"));
-
-        } catch (IllegalArgumentException exception) {
-            player.sendMessage(color("&cInvalid settings!"));
+            slot++;
         }
 
-        gui.openCategoryEditor(player, category);
+        inventory.setItem(49, button(
+                Material.EMERALD,
+                "&aCreate Category",
+                List.of("&7Click to create category")
+        ));
+
+        inventory.setItem(53, button(
+                Material.ARROW,
+                "&cBack",
+                List.of("&7Return to editor")
+        ));
+
+        player.openInventory(inventory);
     }
 
-    private void shopUpdate(
-            String category,
-            String name,
-            Material icon,
-            int slot,
-            String permission
+    public void openCategoryEditor(
+            Player player,
+            String category
     ) {
         ShopManager shop = plugin.getShopManager();
 
-        shop.setCategoryName(category, name);
-        shop.setCategoryIcon(category, icon);
-        shop.setCategorySlot(category, slot);
-        shop.setCategoryPermission(category, permission);
-    }
+        if (!shop.hasCategory(category)) return;
 
-    private String color(String message) {
-        return plugin.getConfigManager().color(
-                plugin.getConfigManager().getPrefix() + message
+        Inventory inventory = create(
+                "CATEGORY_EDITOR",
+                category,
+                null,
+                "&8✦ &b" + shop.getCategoryName(category),
+                54
         );
+
+        for (String itemSlot : shop.getItems(category)) {
+            int index;
+
+            try {
+                index = Integer.parseInt(itemSlot);
+            } catch (NumberFormatException exception) {
+                continue;
+            }
+
+            if (index < 0 || index >= 45) continue;
+
+            ItemStack item = shop.getItem(category, itemSlot);
+
+            if (item == null) continue;
+
+            ItemMeta meta = item.getItemMeta();
+
+            if (meta != null) {
+                List<String> lore = meta.hasLore()
+                        ? new ArrayList<>(meta.getLore())
+                        : new ArrayList<>();
+
+                lore.add("");
+                lore.add("&aBuy: &f" +
+                        shop.getBuyPrice(category, itemSlot));
+                lore.add("&cSell: &f" +
+                        shop.getSellPrice(category, itemSlot));
+                lore.add("");
+                lore.add("&eLeft click: Edit item");
+                lore.add("&cRight click: Remove item");
+
+                meta.setLore(
+                        lore.stream()
+                                .map(plugin.getConfigManager()::color)
+                                .toList()
+                );
+
+                item.setItemMeta(meta);
+            }
+
+            inventory.setItem(index, item);
+        }
+
+        inventory.setItem(49, button(
+                Material.ARROW,
+                "&cBack",
+                List.of("&7Return to categories")
+        ));
+
+        inventory.setItem(51, button(
+                Material.NAME_TAG,
+                "&eCategory Settings",
+                List.of(
+                        "&7Rename category",
+                        "&7Change icon",
+                        "&7Change slot",
+                        "&7Set permission"
+                )
+        ));
+
+        inventory.setItem(53, button(
+                Material.EMERALD,
+                "&aAdd Item",
+                List.of(
+                        "&7Hold an item in your hand",
+                        "&7Click an empty category slot"
+                )
+        ));
+
+        player.openInventory(inventory);
     }
 
-    private void playSound(Player player, String path) {
-        if (!plugin.getConfig().getBoolean("sounds.enabled", true)) return;
+    public void openItemEditor(
+            Player player,
+            String category,
+            String slot
+    ) {
+        ShopManager shop = plugin.getShopManager();
 
-        String sound = plugin.getConfig().getString(path);
+        ItemStack item = shop.getItem(category, slot);
 
-        if (sound == null) return;
+        if (item == null) return;
 
-        try {
-            player.playSound(
-                    player.getLocation(),
-                    org.bukkit.Sound.valueOf(sound),
-                    1f,
-                    1f
+        Inventory inventory = create(
+                "ITEM_EDITOR",
+                category,
+                slot,
+                "&8✦ &eItem Editor",
+                27
+        );
+
+        inventory.setItem(4, item.clone());
+
+        inventory.setItem(10, button(
+                Material.EMERALD,
+                "&aBuy Price",
+                List.of(
+                        "&7Current: " +
+                                shop.getBuyPrice(category, slot)
+                )
+        ));
+
+        inventory.setItem(12, button(
+                Material.GOLD_INGOT,
+                "&6Sell Price",
+                List.of(
+                        "&7Current: " +
+                                shop.getSellPrice(category, slot)
+                )
+        ));
+
+        inventory.setItem(14, button(
+                Material.NAME_TAG,
+                "&bDisplay Name",
+                List.of("&7Change item name")
+        ));
+
+        inventory.setItem(16, button(
+                Material.BOOK,
+                "&dLore",
+                List.of("&7Edit item lore")
+        ));
+
+        inventory.setItem(20, button(
+                Material.TRIPWIRE_HOOK,
+                "&6Permission",
+                List.of(
+                        "&7Current: " +
+                                shop.getItemPermission(category, slot),
+                        "&eClick to edit"
+                )
+        ));
+
+        inventory.setItem(22, button(
+                Material.ENDER_PEARL,
+                "&eChange Slot",
+                List.of("&7Move item to another slot")
+        ));
+
+        inventory.setItem(26, button(
+                Material.BARRIER,
+                "&cDelete Item",
+                List.of("&7Permanently remove item")
+        ));
+
+        inventory.setItem(18, button(
+                Material.ARROW,
+                "&cBack",
+                List.of("&7Return to category editor")
+        ));
+
+        player.openInventory(inventory);
+    }
+
+    public void openQuantity(
+            Player player,
+            String category,
+            String slot
+    ) {
+        ShopManager shop = plugin.getShopManager();
+
+        ItemStack item = shop.getItem(category, slot);
+
+        if (item == null) return;
+
+        Inventory inventory = create(
+                "QUANTITY",
+                category,
+                slot,
+                "&8✦ &bSelect Quantity",
+                27
+        );
+
+        inventory.setItem(4, item.clone());
+
+        int[] amounts = {1, 16, 32, 64};
+        int[] positions = {10, 12, 14, 16};
+
+        for (int i = 0; i < amounts.length; i++) {
+            int amount = amounts[i];
+
+            inventory.setItem(
+                    positions[i],
+                    button(
+                            Material.PAPER,
+                            "&aBuy " + amount,
+                            List.of(
+                                    "&7Total: &f" +
+                                            plugin.getEconomyManager().format(
+                                                    shop.getBuyPrice(category, slot)
+                                                            * amount
+                                            ),
+                                    "",
+                                    "&eClick to continue"
+                            )
+                    )
             );
-        } catch (IllegalArgumentException ignored) {
         }
+
+        inventory.setItem(22, button(
+                Material.ARROW,
+                "&cBack",
+                List.of("&7Return to shop")
+        ));
+
+        player.openInventory(inventory);
+    }
+
+    public void openConfirm(
+            Player player,
+            String category,
+            String slot,
+            int amount
+    ) {
+        ShopManager shop = plugin.getShopManager();
+
+        ItemStack item = shop.getItem(category, slot);
+
+        if (item == null) return;
+
+        Inventory inventory = create(
+                "BUY_CONFIRM",
+                category,
+                slot,
+                "&8✦ &eConfirm Purchase",
+                27
+        );
+
+        inventory.setItem(13, item.clone());
+
+        inventory.setItem(11, button(
+                Material.LIME_CONCRETE,
+                "&aConfirm",
+                List.of(
+                        "&7Amount: &f" + amount,
+                        "&7Total: &f" +
+                                plugin.getEconomyManager().format(
+                                        shop.getBuyPrice(category, slot)
+                                                * amount
+                                )
+                )
+        ));
+
+        inventory.setItem(15, button(
+                Material.RED_CONCRETE,
+                "&cCancel",
+                List.of("&7Cancel purchase")
+        ));
+
+        player.openInventory(inventory);
+    }
+
+    public void openSell(Player player) {
+        Inventory inventory = create(
+                "SELL",
+                null,
+                null,
+                "&8✦ &cSELL ITEMS",
+                54
+        );
+
+        // Kosongkan slot 0-48 untuk item pemain.
+        for (int i = 0; i < 49; i++) {
+            inventory.setItem(i, null);
+        }
+
+        inventory.setItem(49, button(
+                Material.EMERALD,
+                "&aSELL ALL",
+                List.of(
+                        "&7Sell all supported items",
+                        "",
+                        "&eClick to sell"
+                )
+        ));
+
+        inventory.setItem(53, button(
+                Material.BARRIER,
+                "&cClose",
+                List.of("&7Return items and close")
+        ));
+
+        player.openInventory(inventory);
     }
 }
