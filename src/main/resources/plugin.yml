@@ -26,6 +26,7 @@ commands:
     usage: /vortexshop
     aliases:
       - vs
+      - sr
 
 permissions:
   vortexshop.admin:
